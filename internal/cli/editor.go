@@ -108,10 +108,31 @@ func EditorCmd(a *app.App, path string) *exec.Cmd {
 		}
 	}
 	if ed == "" {
-		ed = "vi"
+		ed = FindEditor()
 	}
 	// +/^-- puts the cursor under the header block in vi-likes
 	return exec.Command("sh", "-c", ed+` "$1"`, "sh", path)
+}
+
+// EditorName is the editor sandesh will run.
+func EditorName(a *app.App) string {
+	for _, e := range []string{a.Config.Editor, os.Getenv("VISUAL"), os.Getenv("EDITOR")} {
+		if e != "" {
+			return e
+		}
+	}
+	return FindEditor()
+}
+
+// FindEditor is the first editor installed, for when none is set
+// (editor in the config, $VISUAL, $EDITOR): many systems have no vi.
+func FindEditor() string {
+	for _, e := range []string{"nvim", "vim", "vi", "hx", "helix", "micro", "nano", "kak", "emacs -nw"} {
+		if _, err := exec.LookPath(strings.Fields(e)[0]); err == nil {
+			return e
+		}
+	}
+	return "vi" // fails with "vi: not found", which at least says what's missing
 }
 
 // TempFile writes text to a private temp file named for syntax colouring.

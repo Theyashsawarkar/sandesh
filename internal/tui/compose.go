@@ -65,7 +65,7 @@ func (m *Model) editChat(account string, out store.Outgoing, approveID int64) te
 func (m Model) afterEdit(msg editedMsg) (tea.Model, tea.Cmd) {
 	defer os.Remove(msg.path)
 	if msg.err != nil {
-		m.err = "editor: " + msg.err.Error()
+		m.setErr(fmt.Sprintf("the editor (%s) failed: %v · set editor = \"...\" in ~/.config/sandesh/config.toml", cli.EditorName(m.a), msg.err))
 		return m, nil
 	}
 	b, err := os.ReadFile(msg.path)

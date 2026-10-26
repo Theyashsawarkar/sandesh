@@ -4,6 +4,11 @@ Newest first.
 
 ## Unreleased
 
+- **Compose works without $EDITOR**: with no editor set, sandesh used `vi`,
+  which many systems don't have, so `c`, `r` and friends failed at once. It
+  now picks the first installed of nvim, vim, vi, helix, micro, nano, kak
+  and emacs, and says which editor failed and how to set one.
+
 - **Chat sends instantly**: chat messages skip the 10-second undo window
   (`chat_undo_seconds`, default 0; mail keeps `undo_seconds`), appear in the
   conversation as soon as Chat accepts them, and sending always jumps to the
