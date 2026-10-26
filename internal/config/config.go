@@ -85,17 +85,20 @@ type Colors struct {
 }
 
 type Config struct {
-	SendPolicy   string    `toml:"send_policy"`
-	UndoSeconds  int       `toml:"undo_seconds"`
-	MailInterval duration  `toml:"mail_interval"`
-	ChatInterval duration  `toml:"chat_interval"`
-	InitialDays  int       `toml:"initial_days"`
-	MaxThreads   int       `toml:"max_threads"`
-	Notify       bool      `toml:"notify"`
-	AICommand    []string  `toml:"ai_command"`
-	Editor       string    `toml:"editor"`
-	Sections     []Section `toml:"section"`
-	Colors       Colors    `toml:"colors"`
+	SendPolicy  string `toml:"send_policy"`
+	UndoSeconds int    `toml:"undo_seconds"`
+	// ChatUndoSeconds is the undo window for chat messages: none by
+	// default, chat should feel instant
+	ChatUndoSeconds int       `toml:"chat_undo_seconds"`
+	MailInterval    duration  `toml:"mail_interval"`
+	ChatInterval    duration  `toml:"chat_interval"`
+	InitialDays     int       `toml:"initial_days"`
+	MaxThreads      int       `toml:"max_threads"`
+	Notify          bool      `toml:"notify"`
+	AICommand       []string  `toml:"ai_command"`
+	Editor          string    `toml:"editor"`
+	Sections        []Section `toml:"section"`
+	Colors          Colors    `toml:"colors"`
 	// Include is a theme file read after this one (varna writes
 	// ~/.local/state/varna/sandesh.toml); its [colors] win.
 	Include string `toml:"include"`
@@ -164,6 +167,9 @@ func Load(p Paths) (Config, error) {
 	default:
 		return c, fmt.Errorf("send_policy %q: use confirm, known-contacts or allow", c.SendPolicy)
 	}
+	if c.ChatUndoSeconds < 0 {
+		c.ChatUndoSeconds = 0
+	}
 	if c.UndoSeconds < 0 {
 		c.UndoSeconds = 0
 	}
@@ -213,7 +219,8 @@ const Example = `# ~/.config/sandesh/config.toml -- every line is optional.
 # A recipient you've never written to always asks, whatever the policy.
 send_policy = "confirm"
 
-undo_seconds  = 10     # every send waits this long; z (or Ctrl+c) cancels
+undo_seconds  = 10     # every mail waits this long; z (or Ctrl+c) cancels
+chat_undo_seconds = 0  # the same for chat messages (default: sent at once)
 mail_interval = "60s"  # how often the background sync checks Gmail
 chat_interval = "30s"  # and Google Chat
 initial_days  = 30     # how far back the first sync goes

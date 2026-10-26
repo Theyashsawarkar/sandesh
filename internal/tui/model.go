@@ -340,6 +340,36 @@ func (m *Model) recolour() {
 	}
 }
 
+// sent follows up a queued send: the undo window, or straight out (chat,
+// by default), jumping to the end of the chat either way.
+func (m *Model) sent(it store.OutboxItem) tea.Cmd {
+	if it.Kind == "chat" {
+		m.scroll = 1 << 30
+		m.fixView()
+	}
+	if it.Status != store.StatusQueued {
+		m.say("waiting for approval")
+		return nil
+	}
+	if w := m.a.UndoWindow(it.Kind); w > 0 {
+		m.undo = &undo{what: "send", outboxID: it.ID}
+		m.say(fmt.Sprintf("sending in %ds · z cancels", int(w.Seconds())))
+		return nil
+	}
+	m.say("sending…")
+	a := m.a
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		for _, d := range a.DeliverDue(ctx) {
+			if d.ID == it.ID && d.Status == store.StatusFailed {
+				return doneMsg{err: fmt.Errorf("not sent: %s", d.Error)}
+			}
+		}
+		return doneMsg{msg: "sent", sync: true}
+	}
+}
+
 // setErr shows an error on its own line for a while (Esc clears it).
 func (m *Model) setErr(e string) {
 	m.err, m.errAt = e, time.Now()
@@ -483,6 +513,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.say(msg.msg)
 		}
 		m.reload()
+		if msg.sync && m.tab == tabChat {
+			m.scroll = 1 << 30 // your message: show the end of the chat
+			m.fixView()
+		}
 		if msg.err == nil && (msg.sync || msg.msg != "") {
 			return m, m.syncSoon()
 		}
@@ -615,10 +649,9 @@ func (m Model) inputKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if sp, ok := m.curSpace(); ok && text != "" {
 				it, err := m.a.Queue(sp.Account, "chat", store.Outgoing{Space: sp.Name, SpaceName: cli.SpaceTitle(sp), Body: text}, app.OriginYou)
 				if err != nil {
-					m.err = err.Error()
+					m.setErr(err.Error())
 				} else {
-					m.undo = &undo{what: "send", outboxID: it.ID}
-					m.say(fmt.Sprintf("sending in %ds · z cancels", m.a.Config.UndoSeconds))
+					return m, m.sent(it)
 				}
 			}
 		case modeLink:

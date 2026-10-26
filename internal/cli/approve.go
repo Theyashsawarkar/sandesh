@@ -78,7 +78,7 @@ func approveOne(a *app.App, it store.OutboxItem) error {
 			if err := a.Approve(it.ID, e); err != nil {
 				return err
 			}
-			fmt.Printf("Approved. Sends in %ds; `sandesh outbox cancel %d` stops it.\n", a.Config.UndoSeconds, it.ID)
+			fmt.Printf("Approved. Sends in %ds; `sandesh outbox cancel %d` stops it.\n", int(a.UndoWindow(it.Kind).Seconds()), it.ID)
 			time.Sleep(1200 * time.Millisecond)
 			return nil
 		case 'n', 'N':

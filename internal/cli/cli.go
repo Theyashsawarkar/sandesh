@@ -790,7 +790,7 @@ func chat(a *app.App, args []string) error {
 			text = strings.TrimSpace(string(b))
 		}
 		if *nowFlag {
-			a.Config.UndoSeconds = 0
+			a.Config.ChatUndoSeconds = 0
 		}
 		it, err := a.Queue(sp.Account, "chat", store.Outgoing{Space: sp.Name, SpaceName: SpaceTitle(sp), Thread: *thread, Body: text, Files: attach.files()}, app.OriginYou)
 		if err != nil {

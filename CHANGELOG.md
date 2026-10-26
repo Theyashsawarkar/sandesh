@@ -4,6 +4,11 @@ Newest first.
 
 ## Unreleased
 
+- **Chat sends instantly**: chat messages skip the 10-second undo window
+  (`chat_undo_seconds`, default 0; mail keeps `undo_seconds`), appear in the
+  conversation as soon as Chat accepts them, and sending always jumps to the
+  end of the chat.
+
 - **The tmux popup runs the current sandesh**: tmux's environment often lacks
   `~/.local/bin`, so the plugin fell back to a copy built once in its own
   folder and kept running it after updates. It now looks in `~/.local/bin`

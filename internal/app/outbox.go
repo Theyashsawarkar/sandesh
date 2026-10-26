@@ -14,6 +14,14 @@ import (
 	"github.com/Theyashsawarkar/sandesh/internal/store"
 )
 
+// UndoWindow is how long a send of this kind waits before going out.
+func (a *App) UndoWindow(kind string) time.Duration {
+	if kind == "chat" {
+		return time.Duration(a.Config.ChatUndoSeconds) * time.Second
+	}
+	return time.Duration(a.Config.UndoSeconds) * time.Second
+}
+
 // Origins of a send.
 const (
 	OriginYou   = "you"
@@ -41,7 +49,7 @@ func (a *App) Queue(account, kind string, out store.Outgoing, origin string) (st
 	}
 	if it.Status == "" {
 		it.Status = store.StatusQueued
-		it.SendAt = time.Now().Add(time.Duration(a.Config.UndoSeconds) * time.Second).UnixMilli()
+		it.SendAt = time.Now().Add(a.UndoWindow(kind)).UnixMilli()
 	}
 	id, err := a.Store.AddOutbox(it)
 	if err != nil {
@@ -152,7 +160,7 @@ func (a *App) Approve(id int64, edited *store.Outgoing) error {
 			return err
 		}
 	}
-	ok, err := a.Store.Transition(id, store.StatusApproval, store.StatusQueued, time.Now().Add(time.Duration(a.Config.UndoSeconds)*time.Second).UnixMilli())
+	ok, err := a.Store.Transition(id, store.StatusApproval, store.StatusQueued, time.Now().Add(a.UndoWindow(it.Kind)).UnixMilli())
 	if err == nil && !ok {
 		err = fmt.Errorf("#%d changed meanwhile", id)
 	}
@@ -241,7 +249,26 @@ func (a *App) deliver(ctx context.Context, it store.OutboxItem) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		return c.PostMessage(ctx, out.Space, out.Body, out.Thread, refs...)
+		name, err := c.PostMessage(ctx, out.Space, out.Body, out.Thread, refs...)
+		if err != nil {
+			return "", err
+		}
+		// show it at once; the next sync fills in the thread and file refs
+		if acc, err := a.Store.Account(it.Account); err == nil {
+			text := out.Body
+			var files []store.ChatFile
+			for _, f := range out.Files {
+				if text != "" {
+					text += "\n"
+				}
+				text += "📎 " + f.Name
+				files = append(files, store.ChatFile{Name: f.Name, Type: f.Type})
+			}
+			_ = a.Store.PutChatMessages([]store.ChatMessage{{Account: it.Account, Name: name, Space: out.Space, Thread: out.Thread,
+				Sender: acc.ChatUser, SenderName: "You", Text: text, Created: time.Now().UnixMilli(), Files: files}})
+			_ = a.Store.SetSpaceRead(it.Account, out.Space, time.Now().UnixMilli())
+		}
+		return name, nil
 	}
 	files, err := readFiles(out.Files)
 	if err != nil {

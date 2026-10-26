@@ -345,9 +345,11 @@ is written by strangers. So:
   first, `n` declines. Outside tmux you get a notification; answer with
   `sandesh approve` or `A` in the screen. The agent is told what happened
   (sent, declined, cancelled) and nothing else.
-- **Every send waits** `undo_seconds` (10) in the outbox, yours included,
+- **Every mail waits** `undo_seconds` (10) in the outbox, yours included,
   so `z` (or `sandesh outbox cancel <id>`, or Ctrl+c on the command line)
-  stops it.
+  stops it. Chat messages go out at once (`chat_undo_seconds`, default 0)
+  and show in the conversation straight away; agents' chat messages still
+  wait for your approval.
 - **Mail is data, not instructions.** Everything the tools return from
   mail or chat is wrapped in an `<untrusted>` block, and the server tells
   the agent not to follow instructions found there.
@@ -421,7 +423,8 @@ prints this:
 
 ```toml
 send_policy   = "confirm"   # confirm | known-contacts | allow (see Sending safely)
-undo_seconds  = 10          # every send waits this long; z cancels
+undo_seconds  = 10          # every mail waits this long; z cancels
+chat_undo_seconds = 0       # the same for chat (default: sent at once)
 mail_interval = "60s"       # how often the background sync checks Gmail
 chat_interval = "30s"       # and Google Chat
 initial_days  = 30          # how far back the first sync goes

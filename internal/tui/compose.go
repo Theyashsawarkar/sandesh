@@ -172,12 +172,11 @@ func (m Model) reviewKey(s string) (tea.Model, tea.Cmd) {
 	case "y":
 		it, err := m.a.Queue(r.account, r.kind, r.out, app.OriginYou)
 		if err != nil {
-			m.err = err.Error()
+			m.setErr(err.Error())
 			return m, nil
 		}
-		m.undo = &undo{what: "send", outboxID: it.ID}
 		m.review, m.mode = nil, modeNormal
-		m.say(fmt.Sprintf("sending in %ds · z cancels", m.a.Config.UndoSeconds))
+		return m, m.sent(it)
 	case "e":
 		m.mode = modeNormal
 		if r.kind == "chat" {
@@ -218,7 +217,7 @@ func (m Model) approveKey(s string) (tea.Model, tea.Cmd) {
 		if err := m.a.Approve(it.ID, nil); err != nil {
 			m.err = err.Error()
 		} else {
-			m.say(fmt.Sprintf("approved · sends in %ds · z cancels", m.a.Config.UndoSeconds))
+			m.say(fmt.Sprintf("approved · sends in %ds · z cancels", int(m.a.UndoWindow(it.Kind).Seconds())))
 			m.undo = &undo{what: "send", outboxID: it.ID}
 		}
 	case "n":
