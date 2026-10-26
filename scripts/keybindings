@@ -1,7 +1,8 @@
 # Keys inside the sandesh screen, for Vayu's keybinding search
 # (keybind-search.py reads ~/.tmux/plugins/*/scripts). Generated from
 # internal/tui/keys.go by `go test ./internal/tui -update`; don't edit.
-# keybind: Tmux/sandesh | j / k | Move to the next / previous thread or space
+# keybind: Tmux/sandesh | j / k | Move to the next / previous thread or space (j at the end loads older mail)
+# keybind: Tmux/sandesh | + / - | Change how many older mails j at the end loads (10, 25, 50, 100)
 # keybind: Tmux/sandesh | g / G | Jump to the first / last
 # keybind: Tmux/sandesh | h / l | Switch to the previous / next section
 # keybind: Tmux/sandesh | Tab | Switch between mail and chat
@@ -12,8 +13,7 @@
 # keybind: Tmux/sandesh | Q | Toggle the quoted text in the thread
 # keybind: Tmux/sandesh | o | Open a link from the preview by its number
 # keybind: Tmux/sandesh | Ctrl+d / Ctrl+u | Scroll the preview half a page down / up
-# keybind: Tmux/sandesh | / | Search the list as you type (local filter)
-# keybind: Tmux/sandesh | s | Search Gmail on the server (Gmail search syntax)
+# keybind: Tmux/sandesh | / or s | Open the search window: mail and chat here at once, then Gmail's own results
 # keybind: Tmux/sandesh | W | Save the current search as a section
 # keybind: Tmux/sandesh | X | Remove the current saved-search section
 # keybind: Tmux/sandesh | u | Switch account (all, then each one)
@@ -58,6 +58,11 @@
 # keybind: Tmux/sandesh compose | Ctrl+f | Switch the account the mail is sent from
 # keybind: Tmux/sandesh compose | PgUp / PgDn | Scroll the message you're replying to
 # keybind: Tmux/sandesh compose | Esc | Cancel the mail (twice once something is written)
+# keybind: Tmux/sandesh search | Up / Down | Move between the results (Ctrl+p / Ctrl+n too)
+# keybind: Tmux/sandesh search | Enter | Open the result (mail results stay listed as a search section)
+# keybind: Tmux/sandesh search | Tab | Jump between the mail and chat results
+# keybind: Tmux/sandesh search | Ctrl+u | Clear the search
+# keybind: Tmux/sandesh search | Esc | Close the search window
 # keybind: Tmux/sandesh review | y | Send the message you wrote (after the undo window)
 # keybind: Tmux/sandesh review | e | Edit the message again in your editor
 # keybind: Tmux/sandesh review | + | Add a file to the message (attach; fzf picker)

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -398,5 +399,41 @@ func TestBackfillAndKeep(t *testing.T) {
 	}
 	if _, ok := KeepQuery("none"); ok {
 		t.Error("none should turn the backfill off")
+	}
+}
+
+func TestLoadOlder(t *testing.T) {
+	a, g := setup(t)
+	ctx := context.Background()
+	a.Config.Keep = "none"
+	for i := 0; i < 60; i++ {
+		id := fmt.Sprintf("old%02d", i)
+		g.Messages = append(g.Messages, &fake.Message{ID: "m" + id, ThreadID: "t" + id, Labels: []string{"INBOX"}, From: "Old <old@example.com>",
+			To: "you@example.com", Subject: "old " + id, Body: "b", Date: time.Now().AddDate(0, -2, -i), HistoryID: 50})
+	}
+	if _, errs := a.SyncAll(ctx); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	inbox := config.Section{Name: "Inbox", Label: "INBOX"}
+	oldest := func() int64 {
+		ts, _ := a.SectionThreads(inbox, nil)
+		return ts[len(ts)-1].LastDate
+	}
+	before, _ := a.SectionThreads(inbox, nil)
+	n, err := a.LoadOlder(ctx, "work", inbox, oldest(), 10)
+	if err != nil || n != 10 {
+		t.Fatalf("first page: %d %v", n, err)
+	}
+	n, _ = a.LoadOlder(ctx, "work", inbox, oldest(), 40)
+	if n != 40 {
+		t.Fatalf("a bigger page: %d", n)
+	}
+	n, _ = a.LoadOlder(ctx, "work", inbox, oldest(), 25)
+	after, _ := a.SectionThreads(inbox, nil)
+	if n != 10 || len(after) != len(before)+60 {
+		t.Fatalf("second page: %d, %d → %d threads", n, len(before), len(after))
+	}
+	if n, _ := a.LoadOlder(ctx, "work", inbox, oldest(), 10); n != 0 {
+		t.Fatalf("nothing older left, got %d", n)
 	}
 }

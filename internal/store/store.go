@@ -529,6 +529,16 @@ func (s *Store) Messages(account, threadID string) ([]Message, error) {
 	return out, rows.Err()
 }
 
+// AddSectionThreads adds threads to a search section without replacing it.
+func (s *Store) AddSectionThreads(account, section string, ids []string) error {
+	for _, id := range ids {
+		if _, err := s.db.Exec(`INSERT OR IGNORE INTO section_threads(account,section,thread_id) VALUES(?,?,?)`, account, section, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) SetSectionThreads(account, section string, ids []string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -830,6 +840,53 @@ func (s *Store) PutSpace(sp Space) error {
 	  ON CONFLICT(account,name) DO UPDATE SET display_name=CASE WHEN excluded.display_name<>'' THEN excluded.display_name ELSE display_name END,
 	  type=excluded.type, last_active=MAX(last_active,excluded.last_active)`, sp.Account, sp.Name, sp.DisplayName, sp.Type, sp.LastActive)
 	return err
+}
+
+// ChatHit is a chat message found by a search, with its space's title.
+type ChatHit struct {
+	ChatMessage
+	SpaceTitle string
+	SpaceType  string
+}
+
+// SearchChat finds chat messages whose text or sender contains every word
+// of the query, newest first.
+func (s *Store) SearchChat(accounts []string, query string, limit int) ([]ChatHit, error) {
+	words := strings.Fields(strings.ToLower(query))
+	if len(words) == 0 {
+		return nil, nil
+	}
+	var where []string
+	var args []any
+	for _, w := range words {
+		where = append(where, "(LOWER(c.text) LIKE ? OR LOWER(c.sender_name) LIKE ?)")
+		args = append(args, "%"+w+"%", "%"+w+"%")
+	}
+	if len(accounts) > 0 {
+		where = append(where, "c.account IN (?"+strings.Repeat(",?", len(accounts)-1)+")")
+		for _, a := range accounts {
+			args = append(args, a)
+		}
+	}
+	args = append(args, limit)
+	rows, err := s.db.Query(`SELECT c.account,c.name,c.space,c.thread,c.sender,c.sender_name,c.text,c.created, c.sender=a.chat_user, sp.display_name, sp.type
+	  FROM chat_messages c JOIN accounts a ON a.name=c.account LEFT JOIN spaces sp ON sp.account=c.account AND sp.name=c.space
+	  WHERE `+strings.Join(where, " AND ")+` ORDER BY c.created DESC LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ChatHit
+	for rows.Next() {
+		var h ChatHit
+		var title, typ sql.NullString
+		if err := rows.Scan(&h.Account, &h.Name, &h.Space, &h.Thread, &h.Sender, &h.SenderName, &h.Text, &h.Created, &h.Mine, &title, &typ); err != nil {
+			return nil, err
+		}
+		h.SpaceTitle, h.SpaceType = title.String, typ.String
+		out = append(out, h)
+	}
+	return out, rows.Err()
 }
 
 // ChatMessage returns one stored chat message.

@@ -95,6 +95,9 @@ func (m Model) View() string {
 	} else {
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, left, right))
 	}
+	if m.mode == modeFind && m.find != nil {
+		rows[len(rows)-1] = overlay(rows[len(rows)-1], m.finderView(), m.w)
+	}
 	if len(m.waiting) > 0 && m.mode != modeApprove {
 		rows = append(rows, m.styles.banner.Render(fmt.Sprintf("󰀦 %d send(s) from an agent wait for your approval · press A", len(m.waiting))))
 	}
@@ -257,7 +260,7 @@ func (m Model) helpView(w, h int) string {
 	s := m.styles
 	var groups [][]string
 	for _, k := range Keys {
-		if k.Group == "Review" || k.Group == "Approve" || k.Group == "Setup" || k.Group == "Compose" {
+		if k.Group == "Review" || k.Group == "Approve" || k.Group == "Setup" || k.Group == "Compose" || k.Group == "Search" {
 			continue
 		}
 		if len(groups) == 0 || !strings.EqualFold(stripANSI(groups[len(groups)-1][0]), k.Group) {
@@ -401,7 +404,7 @@ func (m Model) inputView() string {
 func (m Model) footerView() string {
 	s := m.styles
 	modeName := map[mode]string{modeNormal: "normal", modeFilter: "filter", modeAsk: "ask", modeSearch: "search", modeSaveName: "save",
-		modeDraftHint: "draft", modeReview: "review", modeApprove: "approve", modeHelp: "keys", modeChatMsg: "message", modeLink: "link", modeCompose: "compose"}[m.mode]
+		modeDraftHint: "draft", modeReview: "review", modeApprove: "approve", modeHelp: "keys", modeChatMsg: "message", modeLink: "link", modeCompose: "compose", modeFind: "search"}[m.mode]
 	var keys [][2]string
 	switch m.mode {
 	case modeReview:
@@ -411,6 +414,8 @@ func (m Model) footerView() string {
 		}
 	case modeApprove:
 		keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"n", "decline"}, {"q", "later"}}
+	case modeFind:
+		keys = [][2]string{{"↑↓", "move"}, {"enter", "open"}, {"tab", "mail/chat"}, {"esc", "close"}}
 	case modeCompose:
 		keys = [][2]string{{"tab", "next"}, {"↑↓", "pick"}, {"ctrl+o", "attach"}, {"ctrl+b", "cc/bcc"}, {"ctrl+q", "quote"}, {"ctrl+g", "signature"}}
 		if m.comp != nil && m.comp.reply {

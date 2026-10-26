@@ -15,7 +15,8 @@ type Key struct {
 }
 
 var Keys = []Key{
-	{"Move", "j / k", "Move to the next / previous thread or space"},
+	{"Move", "j / k", "Move to the next / previous thread or space (j at the end loads older mail)"},
+	{"Move", "+ / -", "Change how many older mails j at the end loads (10, 25, 50, 100)"},
 	{"Move", "g / G", "Jump to the first / last"},
 	{"Move", "h / l", "Switch to the previous / next section"},
 	{"Move", "Tab", "Switch between mail and chat"},
@@ -26,8 +27,7 @@ var Keys = []Key{
 	{"Move", "Q", "Toggle the quoted text in the thread"},
 	{"Move", "o", "Open a link from the preview by its number"},
 	{"Move", "Ctrl+d / Ctrl+u", "Scroll the preview half a page down / up"},
-	{"Move", "/", "Search the list as you type (local filter)"},
-	{"Move", "s", "Search Gmail on the server (Gmail search syntax)"},
+	{"Move", "/ or s", "Open the search window: mail and chat here at once, then Gmail's own results"},
 	{"Move", "W", "Save the current search as a section"},
 	{"Move", "X", "Remove the current saved-search section"},
 	{"Move", "u", "Switch account (all, then each one)"},
@@ -72,6 +72,11 @@ var Keys = []Key{
 	{"Compose", "Ctrl+f", "Switch the account the mail is sent from"},
 	{"Compose", "PgUp / PgDn", "Scroll the message you're replying to"},
 	{"Compose", "Esc", "Cancel the mail (twice once something is written)"},
+	{"Search", "Up / Down", "Move between the results (Ctrl+p / Ctrl+n too)"},
+	{"Search", "Enter", "Open the result (mail results stay listed as a search section)"},
+	{"Search", "Tab", "Jump between the mail and chat results"},
+	{"Search", "Ctrl+u", "Clear the search"},
+	{"Search", "Esc", "Close the search window"},
 	{"Review", "y", "Send the message you wrote (after the undo window)"},
 	{"Review", "e", "Edit the message again in your editor"},
 	{"Review", "+", "Add a file to the message (attach; fzf picker)"},
@@ -104,6 +109,8 @@ func KeybindLines() string {
 		switch k.Group {
 		case "Compose":
 			scope = "sandesh compose"
+		case "Search":
+			scope = "sandesh search"
 		case "Review":
 			scope = "sandesh review"
 		case "Approve":

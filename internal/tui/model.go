@@ -34,6 +34,7 @@ const (
 	modeChatMsg // typing a chat message in the preview
 	modeLink    // typing a link number after o
 	modeCompose // the compose screen
+	modeFind    // the search window
 )
 
 const (
@@ -90,33 +91,37 @@ type Model struct {
 	showQuoted bool
 	labelNames map[string]string
 
-	mode       mode
-	input      []rune
-	filter     string
-	ai         string
-	aiTitle    string
-	aiBusy     bool
-	toast      string
-	toastAt    time.Time
-	undo       *undo
-	review     *review
-	older      store.Backfill              // the download of older mail, all accounts
-	dbStamp    string                      // when the local copy last changed
-	sentStat   map[string]store.SentStatus // Sent: did they answer?
-	outboxRows map[string]store.OutboxItem // Sent: rows still in the outbox
-	comp       *composer
-	waiting    []store.OutboxItem
-	syncing    bool
-	synced     time.Time
-	err        string
-	errAt      time.Time
-	atBottom   bool // the preview is scrolled to its end
-	themeStamp string
-	lastSync   time.Time
+	mode         mode
+	input        []rune
+	filter       string
+	ai           string
+	aiTitle      string
+	aiBusy       bool
+	toast        string
+	toastAt      time.Time
+	undo         *undo
+	review       *review
+	older        store.Backfill // the download of older mail, all accounts
+	olderN       int            // how many "load older" fetches
+	loadingOlder bool
+	noOlder      map[string]bool             // sections with nothing older on Gmail
+	dbStamp      string                      // when the local copy last changed
+	sentStat     map[string]store.SentStatus // Sent: did they answer?
+	outboxRows   map[string]store.OutboxItem // Sent: rows still in the outbox
+	comp         *composer
+	find         *finder
+	waiting      []store.OutboxItem
+	syncing      bool
+	synced       time.Time
+	err          string
+	errAt        time.Time
+	atBottom     bool // the preview is scrolled to its end
+	themeStamp   string
+	lastSync     time.Time
 }
 
 func New(a *app.App, launch string) Model {
-	m := Model{a: a, launch: launch, styles: newStyles(a.Config.Colors), acct: -1, selected: map[string]bool{}, counts: map[string]int{},
+	m := Model{a: a, launch: launch, styles: newStyles(a.Config.Colors), acct: -1, selected: map[string]bool{}, counts: map[string]int{}, noOlder: map[string]bool{}, olderN: a.Config.OlderPage,
 		expanded: map[string]bool{}}
 	m.sections = a.Sections()
 	m.accounts = a.AccountNames()
@@ -303,6 +308,48 @@ func (m *Model) curThread() (store.Thread, bool) {
 		return store.Thread{}, false
 	}
 	return m.threads[m.sel], true
+}
+
+type olderMsg struct {
+	section string
+	n       int
+	err     error
+}
+
+// loadOlderCmd fetches the next older batch of the section from Gmail.
+func (m *Model) loadOlderCmd() tea.Cmd {
+	sec := m.currentSection()
+	if m.loadingOlder || m.noOlder[sec.Name] || sec.Today {
+		return nil
+	}
+	oldest := map[string]int64{}
+	for _, t := range m.threads {
+		if strings.HasPrefix(t.ID, outboxPrefix) {
+			continue
+		}
+		if o, ok := oldest[t.Account]; !ok || t.LastDate < o {
+			oldest[t.Account] = t.LastDate
+		}
+	}
+	accs := m.accountFilter()
+	if len(accs) == 0 {
+		accs = m.accounts
+	}
+	m.loadingOlder = true
+	a, n := m.a, m.olderN
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		total := 0
+		for _, acc := range accs {
+			got, err := a.LoadOlder(ctx, acc, sec, oldest[acc], n)
+			if err != nil {
+				return olderMsg{sec.Name, total, err}
+			}
+			total += got
+		}
+		return olderMsg{sec.Name, total, nil}
+	}
 }
 
 // Sent shows mail still in the outbox (sending, failed) above what went out.
@@ -563,6 +610,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = ""
 		}
 		return m, tea.Batch(cmds...)
+	case olderMsg:
+		m.loadingOlder = false
+		if msg.err != nil {
+			m.setErr("older mail: " + msg.err.Error())
+			return m, nil
+		}
+		if msg.n == 0 {
+			m.noOlder[msg.section] = true
+			m.say("that's everything in " + msg.section)
+			return m, nil
+		}
+		m.reload()
+		m.say(fmt.Sprintf("loaded %d older", msg.n))
+		return m, nil
 	case pickedFilesMsg:
 		return m.afterPick(msg)
 	case syncSoonMsg:
@@ -620,6 +681,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case editedMsg:
 		return m.afterEdit(msg)
+	case findTickMsg:
+		return m, m.findServer(msg.q)
+	case findServerMsg:
+		m.gotFindServer(msg)
+		return m, nil
 	case dirTickMsg:
 		return m, m.dirLookup(msg.q)
 	case dirMsg:
@@ -667,6 +733,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	s := k.String()
 	if m.mode == modeCompose && m.comp != nil {
 		return m.composerKey(k)
+	}
+	if m.mode == modeFind && m.find != nil {
+		return m.finderKey(k)
 	}
 	if s == "ctrl+c" {
 		return m, tea.Quit
@@ -797,6 +866,8 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 	case "j", "down":
 		if m.focus == 1 {
 			m.scroll++
+		} else if m.tab == tabMail && m.sel >= m.count()-1 && m.count() > 0 {
+			return m, m.loadOlderCmd()
 		} else if m.sel < m.count()-1 {
 			m.sel++
 			m.ai = ""
@@ -868,12 +939,8 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		if sp, ok := m.curSpace(); ok && sp.Unread > 0 {
 			return m, m.act("", func(ctx context.Context) error { return m.a.MarkSpaceRead(ctx, sp.Account, sp.Name) })
 		}
-	case "/":
-		m.mode, m.input = modeFilter, []rune(m.filter)
-	case "s":
-		if m.tab == tabMail {
-			m.mode, m.input = modeSearch, nil
-		}
+	case "/", "s":
+		m.openFinder()
 	case "W":
 		if m.search != nil {
 			m.mode, m.input = modeSaveName, nil // Enter alone names it after the search
@@ -965,6 +1032,18 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 			if _, ok := m.curSpace(); ok {
 				m.mode, m.input = modeChatMsg, nil
 			}
+		}
+	case "+", "-":
+		if m.tab == tabMail {
+			sizes := []int{10, 25, 50, 100}
+			i := slices.Index(sizes, m.olderN)
+			if s == "+" {
+				i = min(len(sizes)-1, i+1)
+			} else {
+				i = max(0, i-1)
+			}
+			m.olderN = sizes[max(0, i)]
+			m.say(fmt.Sprintf("older mail loads %d at a time", m.olderN))
 		}
 	case "z":
 		if it, ok := m.curOutbox(); ok && (it.Status == store.StatusQueued || it.Status == store.StatusApproval) {
@@ -1160,6 +1239,12 @@ func (m *Model) searchCmd(q string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		ts, err := a.SearchServer(ctx, account.Name, q, 50)
+		// kept like a section, so a refresh shows it and "load older" adds to it
+		var ids []string
+		for _, t := range ts {
+			ids = append(ids, t.ID)
+		}
+		_ = a.Store.SetSectionThreads(account.Name, "search: "+q, ids)
 		return searchMsg{q, ts, err}
 	}
 }

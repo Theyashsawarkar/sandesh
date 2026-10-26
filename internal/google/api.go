@@ -170,7 +170,11 @@ func (c *Client) raw(ctx context.Context, method, u, ctype string, payload []byt
 		t0 := time.Now()
 		resp, err := c.HTTP.Do(req)
 		if debugHTTP {
-			fmt.Fprintf(os.Stderr, "sandesh http: %s %s %v\n", method, strings.SplitN(u, "?", 2)[0], time.Since(t0).Round(time.Millisecond))
+			code := 0
+			if resp != nil {
+				code = resp.StatusCode
+			}
+			fmt.Fprintf(os.Stderr, "sandesh http: %s %s %d %v\n", method, strings.SplitN(u, "?", 2)[0], code, time.Since(t0).Round(time.Millisecond))
 		}
 		if err != nil {
 			return nil, err
@@ -275,10 +279,13 @@ func (c *Client) ThreadsTotal(ctx context.Context) (int, error) {
 
 // ThreadsPage returns one page of thread ids (newest first) and the token
 // for the next ("" at the end).
-func (c *Client) ThreadsPage(ctx context.Context, q, page string, max int) ([]string, string, error) {
+func (c *Client) ThreadsPage(ctx context.Context, q, page string, max int, labels ...string) ([]string, string, error) {
 	v := url.Values{"maxResults": {fmt.Sprint(max)}}
 	if q != "" {
 		v.Set("q", q)
+	}
+	for _, l := range labels {
+		v.Add("labelIds", l)
 	}
 	if page != "" {
 		v.Set("pageToken", page)

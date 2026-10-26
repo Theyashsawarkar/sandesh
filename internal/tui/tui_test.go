@@ -102,11 +102,16 @@ func TestScreen(t *testing.T) {
 	if th, _ := m.curThread(); th.ID != "t-arjun" {
 		t.Fatalf("j j selected %s", th.ID)
 	}
-	m = press(m, "/", "l", "u", "n", "c", "h", "enter")
-	if len(m.threads) != 1 || m.threads[0].ID != "t-rohan" {
-		t.Fatalf("filter: %+v", m.threads)
+	// / opens the search window: local results as you type, Enter opens
+	m = press(m, "/", "l", "u", "n", "c", "h")
+	if m.mode != modeFind || len(m.find.mail) != 1 || !strings.Contains(m.View(), "MAIL · 1") {
+		t.Fatalf("search window: %+v", m.find)
 	}
-	m = press(m, "esc", "tab")
+	m = press(m, "enter")
+	if th, ok := m.curThread(); !ok || th.ID != "t-rohan" || m.search == nil {
+		t.Fatalf("opened: %+v %v", th, m.search)
+	}
+	m = press(m, "h", "tab")
 	if !strings.Contains(m.View(), "portal-dev") {
 		t.Fatal("chat tab")
 	}

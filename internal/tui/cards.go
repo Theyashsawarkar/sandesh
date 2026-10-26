@@ -45,7 +45,7 @@ func (m Model) cardBox(lines []string, w int, border string, sel, dot bool) []st
 	tl, tr, bl, br, hz, vt := "╭", "╮", "╰", "╯", "─", "│"
 	if sel {
 		b = b.Bold(true)
-		tl, tr, bl, br, hz, vt = "┏", "┓", "┗", "┛", "━", "┃"
+		vt = "┃" // rounded corners still; heavier sides mark the selection
 	}
 	out := []string{b.Render(tl + strings.Repeat(hz, w+2) + tr)}
 	for i, l := range lines {
@@ -145,13 +145,27 @@ func (m Model) avatar(name string) string {
 			break
 		}
 	}
+	if len(ini) == 1 { // one word: its first two letters
+		if r := []rune(strings.ToUpper(strings.TrimSpace(name))); len(r) > 1 && r[1] != ' ' {
+			ini = append(ini, r[1])
+		}
+	}
 	for len(ini) < 2 {
 		ini = append(ini, ' ')
 	}
 	ac := m.styles.avatarColors()
-	return lipgloss.NewStyle().Background(lipgloss.Color(ac[h%len(ac)])).
-		Foreground(lipgloss.Color(m.styles.c.Base)).Bold(true).Render(string(ini))
+	col := lipgloss.Color(ac[h%len(ac)])
+	face := lipgloss.NewStyle().Background(col).Foreground(lipgloss.Color(m.styles.c.Base)).Bold(true).Render(string(ini))
+	if !m.a.Config.NerdFont {
+		return face
+	}
+	// round ends (Nerd Font half circles) make it a pill-shaped circle
+	cap := lipgloss.NewStyle().Foreground(col)
+	return cap.Render("\ue0b6") + face + cap.Render("\ue0b4")
 }
+
+// indent lines up text under a name that follows an avatar.
+func (m Model) indent() string { return strings.Repeat(" ", lipgloss.Width(m.avatar("x"))+1) }
 
 func (m Model) chip(text, color string) string {
 	return fg(color).Render("‹" + text + "›")
@@ -253,12 +267,29 @@ func (m *Model) listView(w, h int) string {
 			if sp.LastSender != "" {
 				last = strings.SplitN(sp.LastSender, " ", 2)[0] + ": " + last
 			}
-			lines = []string{row(m.avatar(name)+" "+mark+title, s.muted.Render(cli.When(sp.LastActive)), cw), "   " + s.muted.Render(last)}
+			lines = []string{row(m.avatar(name)+" "+mark+title, s.muted.Render(cli.When(sp.LastActive)), cw), m.indent() + s.muted.Render(last)}
 		}
 		for _, l := range m.cardBox(lines, cw, border, sel, dot) {
 			out = append(out, " "+l)
 		}
 		out = append(out, "")
+	}
+	// the end of a mail list: older mail comes from Gmail on demand
+	if m.tab == tabMail && m.offset+visible >= m.count() && !m.currentSection().Today {
+		sec := m.currentSection().Name
+		var hint string
+		switch {
+		case m.loadingOlder:
+			hint = s.accent.Render(fmt.Sprintf("  ⟳ loading %d older…", m.olderN))
+		case m.noOlder[sec]:
+			hint = s.muted.Render("  ✓ that's everything in " + sec)
+		default:
+			hint = s.muted.Render(fmt.Sprintf("  ↓ j at the end loads %d older", m.olderN)) + s.muted.Render(" · + / - for more or fewer")
+		}
+		if len(out) > 0 && out[len(out)-1] == "" {
+			out = out[:len(out)-1]
+		}
+		out = append(out, "", ansi.Truncate(hint, w, "…"))
 	}
 	return strings.Join(out, "\n")
 }
@@ -361,7 +392,7 @@ func (m *Model) mailLines(t store.Thread, w int) []string {
 		head := row(m.avatar(from)+" "+s.bold.Render(from)+s.muted.Render(" <"+msg.FromAddr+">"), s.muted.Render(date), inner)
 		border := s.c.Border
 		if !open {
-			lines := []string{head, "   " + ansi.Truncate(s.muted.Render(oneLine(msg.Body)), inner-3, "…")}
+			lines := []string{head, m.indent() + ansi.Truncate(s.muted.Render(oneLine(msg.Body)), inner-lipgloss.Width(m.indent()), "…")}
 			out = append(out, m.cardBox(lines, inner, border, false, false)...)
 			out = append(out, "")
 			continue
@@ -372,7 +403,7 @@ func (m *Model) mailLines(t store.Thread, w int) []string {
 		if msg.Cc != "" {
 			to += " · cc " + shortAddrs(msg.Cc)
 		}
-		lines = append(lines, "   "+s.muted.Render(to))
+		lines = append(lines, m.indent()+s.muted.Render(to))
 		sep := len(lines)
 		var res render.Result
 		if strings.TrimSpace(msg.HTML) != "" {
@@ -567,7 +598,7 @@ func (m *Model) chatLines(w int) []string {
 				if c.Mine {
 					out = append(out, padLeft(l+" "+bar, w))
 				} else {
-					out = append(out, "   "+bar+" "+l)
+					out = append(out, m.indent()+bar+" "+l)
 				}
 			}
 		}

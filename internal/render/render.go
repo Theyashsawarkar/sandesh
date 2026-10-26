@@ -708,7 +708,7 @@ func table(bl block, w int, st Styles) []string {
 		return bd.Render(l + strings.Join(parts, m) + r)
 	}
 	var out []string
-	out = append(out, line("┌", "┬", "┐"))
+	out = append(out, line("╭", "┬", "╮"))
 	for i, row := range texts {
 		var cells []string
 		for j, t := range row {
@@ -725,7 +725,7 @@ func table(bl block, w int, st Styles) []string {
 			out = append(out, line("├", "┼", "┤"))
 		}
 	}
-	out = append(out, line("└", "┴", "┘"))
+	out = append(out, line("╰", "┴", "╯"))
 	return out
 }
 

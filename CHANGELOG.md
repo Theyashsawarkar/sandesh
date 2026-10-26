@@ -4,6 +4,21 @@ Newest first.
 
 ## Unreleased
 
+- **A search window**: `/` (or `s`) opens a floating search over the
+  screen. Mail and chat from this machine show as you type, matches
+  highlighted, with a preview of the highlighted result; when typing pauses,
+  Gmail's own search adds what isn't here yet (☁). Gmail search syntax
+  works. Replaces the old local filter and separate server search.
+- **Older mail on demand**: no background download by default any more
+  (`keep = "none"`; it competed with searches for Gmail's rate limit). `j`
+  at the end of a list loads the next 10 older threads of that section;
+  `+` / `-` change the batch (10, 25, 50, 100), `older_page` the default.
+- **Search results survive a refresh**: they're kept like a section.
+- **Rounded everywhere, round avatars**: the selected card keeps rounded
+  corners (heavier sides mark it), mail tables have rounded corners, and
+  initials sit in round pills (Nerd Font half circles; `nerd_font = false`
+  for plain ones).
+
 - **Compose, redone** (from the approved mockup): a new mail gets the whole
   screen; a reply keeps the original on the left (PgUp/PgDn). Recipients are
   pills with initials (←/→ selects, Backspace removes); someone you've never

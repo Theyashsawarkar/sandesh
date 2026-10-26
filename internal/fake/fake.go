@@ -261,8 +261,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				newer = time.Now().AddDate(-n, 0, 0)
 			}
 		}
+		var before time.Time
+		if i := strings.Index(query, "before:"); i >= 0 {
+			before, _ = time.ParseInLocation("2006/01/02", strings.Fields(query[i+7:])[0], time.Local)
+			query = strings.TrimSpace(query[:i])
+		}
 		for _, m := range msgs {
-			if seen[m.ThreadID] || has(m.Labels, "TRASH") || m.Date.Before(newer) {
+			if seen[m.ThreadID] || has(m.Labels, "TRASH") || m.Date.Before(newer) || !before.IsZero() && !m.Date.Before(before) {
+				continue
+			}
+			if l := q["labelIds"]; len(l) > 0 && !has(m.Labels, l[0]) {
 				continue
 			}
 			if f, ok := strings.CutPrefix(query, "from:"); ok && !strings.Contains(strings.ToLower(m.From), strings.ToLower(strings.Fields(f)[0])) {

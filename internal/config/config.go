@@ -96,7 +96,11 @@ type Config struct {
 	// Keep is how much older mail to download in the background: "all"
 	// (default), or an age like "1y", "6m", "90d"; "none" stops at the
 	// first sync
-	Keep       string   `toml:"keep"`
+	Keep string `toml:"keep"`
+	// OlderPage is how many older threads "load older" fetches at a time
+	OlderPage int `toml:"older_page"`
+	// NerdFont draws round avatars and icons with Nerd Font glyphs
+	NerdFont   bool     `toml:"nerd_font"`
 	MaxThreads int      `toml:"max_threads"`
 	Notify     bool     `toml:"notify"`
 	AICommand  []string `toml:"ai_command"`
@@ -128,7 +132,9 @@ func Default() Config {
 		MailInterval: duration{60 * time.Second},
 		ChatInterval: duration{30 * time.Second},
 		InitialDays:  30,
-		Keep:         "all",
+		Keep:         "none",
+		OlderPage:    10,
+		NerdFont:     true,
 		MaxThreads:   150,
 		Notify:       true,
 		AICommand:    []string{"claude", "-p"},
@@ -178,6 +184,9 @@ func Load(p Paths) (Config, error) {
 	}
 	if c.ChatUndoSeconds < 0 {
 		c.ChatUndoSeconds = 0
+	}
+	if c.OlderPage <= 0 {
+		c.OlderPage = 10
 	}
 	if c.UndoSeconds < 0 {
 		c.UndoSeconds = 0
@@ -233,7 +242,9 @@ chat_undo_seconds = 0  # the same for chat messages (default: sent at once)
 mail_interval = "60s"  # how often the background sync checks Gmail
 chat_interval = "30s"  # and Google Chat
 initial_days  = 30     # how far back the quick first sync goes
-keep          = "all"  # then older mail fills in, in the background: "all", "1y", "6m", "90d" or "none"
+keep          = "none" # download older mail in the background too: "all", "1y", "6m", "90d" (default: none)
+nerd_font     = true   # round avatars (needs a Nerd Font, as most terminal setups have)
+older_page    = 10     # how many older threads j at the end of a list loads (+ / - change it there)
 max_threads   = 150    # at most this many threads on the first sync (older mail: search)
 notify        = true   # desktop notification for new mail and DMs
 ai_command    = ["claude", "-p"]   # what @, S, D and T run

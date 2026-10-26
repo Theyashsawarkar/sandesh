@@ -244,6 +244,61 @@ func (a *App) SectionThreads(s config.Section, accounts []string) ([]store.Threa
 	return out, nil
 }
 
+// LoadOlder fetches up to n threads of a section (label sections
+// and searches) older than the oldest one here: Gmail's own search with
+// before:, so nothing has to be downloaded ahead of time. Returns how many
+// it added; 0 means the section has nothing older.
+func (a *App) LoadOlder(ctx context.Context, account string, sec config.Section, oldest int64, n int) (int, error) {
+	n = max(1, min(n, 500))
+	if sec.Today {
+		return 0, nil
+	}
+	acc, err := a.Store.Account(account)
+	if err != nil {
+		return 0, err
+	}
+	c, err := a.Client(account)
+	if err != nil {
+		return 0, err
+	}
+	q := strings.TrimSpace(sec.Query)
+	if oldest > 0 {
+		// before: is a date: take the day after, the ones we have are skipped
+		q = strings.TrimSpace(q + " before:" + time.UnixMilli(oldest).AddDate(0, 0, 1).Format("2006/01/02"))
+	}
+	var labels []string
+	if sec.Label != "" {
+		labels = []string{sec.Label}
+	}
+	var missing []string
+	page := ""
+	for pages := 0; len(missing) < n && pages < 10; pages++ {
+		ids, next, err := c.ThreadsPage(ctx, q, page, min(500, max(n, 50)), labels...)
+		if err != nil {
+			return 0, err
+		}
+		for _, id := range ids {
+			if len(missing) < n && !a.Store.HasThread(account, id) {
+				missing = append(missing, id)
+			}
+		}
+		if next == "" {
+			break
+		}
+		page = next
+	}
+	if len(missing) == 0 {
+		return 0, nil
+	}
+	if _, err := a.fetchThreads(ctx, c, acc, missing, false); err != nil {
+		return 0, err
+	}
+	if sec.Query != "" && sec.Label == "" {
+		_ = a.Store.AddSectionThreads(account, sec.Name, missing)
+	}
+	return len(missing), nil
+}
+
 // SearchServer runs a Gmail search on the server, caches the threads it
 // finds and returns them (newest first).
 func (a *App) SearchServer(ctx context.Context, account, query string, max int) ([]store.Thread, error) {

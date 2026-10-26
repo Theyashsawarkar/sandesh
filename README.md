@@ -202,7 +202,8 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 
 | Key | Does |
 |---|---|
-| `j` / `k` | Move to the next / previous thread or space |
+| `j` / `k` | Move to the next / previous thread or space (j at the end loads older mail) |
+| `+` / `-` | Change how many older mails j at the end loads (10, 25, 50, 100) |
 | `g` / `G` | Jump to the first / last |
 | `h` / `l` | Switch to the previous / next section |
 | `Tab` | Switch between mail and chat |
@@ -213,8 +214,7 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `Q` | Toggle the quoted text in the thread |
 | `o` | Open a link from the preview by its number |
 | `Ctrl+d` / `Ctrl+u` | Scroll the preview half a page down / up |
-| `/` | Search the list as you type (local filter) |
-| `s` | Search Gmail on the server (Gmail search syntax) |
+| `/` or `s` | Open the search window: mail and chat here at once, then Gmail's own results |
 | `W` | Save the current search as a section |
 | `X` | Remove the current saved-search section |
 | `u` | Switch account (all, then each one) |
@@ -259,6 +259,21 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 |---|---|
 | `?` | Show every key |
 | `q` / `Esc` | Go back, then quit |
+
+**Searching** (`/` or `s`): a floating window over the screen. Results
+from this machine show as you type (mail and chat, matches highlighted,
+with a preview of the highlighted one); when you pause, Gmail's own search
+runs and adds what isn't here yet (marked ☁). Gmail's search syntax works:
+`from:priya has:attachment newer_than:7d`. Enter opens a result; mail
+results stay listed as a search section (`W` saves it).
+
+| Key | Search |
+|---|---|
+| `Up` / `Down` | Move between the results (Ctrl+p / Ctrl+n too) |
+| `Enter` | Open the result (mail results stay listed as a search section) |
+| `Tab` | Jump between the mail and chat results |
+| `Ctrl+u` | Clear the search |
+| `Esc` | Close the search window |
 
 **Writing a mail** (`c`, `r`, `a`, `f`, or `D`): a new mail takes the whole
 screen; a reply keeps the message you're answering on the left (PgUp/PgDn
@@ -314,14 +329,15 @@ to (`→ Priya, Arjun`) and whether they answered: `↩ Priya replied 09:58` or
 (`z` cancels), an agent's waiting for your OK (`A`), or `failed` in red (`R`
 sends it again).
 
-## All your mail
+## Older mail
 
 The first sync is quick: the last `initial_days` (30) of mail, at most
-`max_threads`. After that the background sync keeps filling in older mail,
-newest first, about 150 threads a minute (well inside Gmail's limit), until
-the whole mailbox is here; the top bar shows `older mail ▰▰▱▱ 1,240 / 3,908`
-meanwhile. `keep = "1y"` (or `"6m"`, `"90d"`) stops at that age; `keep =
-"none"` keeps only the first sync's window.
+`max_threads`. Older mail stays on Gmail until you want it: press `j` at the
+end of a list and the next 10 older threads of that section come in (`+` /
+`-` make it 25, 50 or 100; `older_page` sets the default), or search (`/`)
+and Gmail finds it wherever it is. Want everything here anyway? `keep =
+"all"` (or `"1y"`, `"6m"`) downloads older mail in the background, ~150
+threads a minute, with a progress bar in the top bar.
 
 ## Files
 
