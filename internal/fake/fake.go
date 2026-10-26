@@ -490,6 +490,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"sender": map[string]string{"name": m.Sender, "type": "HUMAN"}, "thread": map[string]string{"name": m.Thread}, "attachment": atts})
 		}
 		write(w, map[string]any{"messages": out})
+	case p == "/people/v1/people:searchDirectoryPeople":
+		q := strings.ToLower(q.Get("query"))
+		var out []any
+		for _, d := range [][2]string{{"Kavya Iyer", "kavya.i@example.com"}, {"Karan Shah", "karan.s@example.com"},
+			{"Meera Nair", "meera.n@example.com"}, {"Priya Kulkarni", "priya.k@example.com"}} {
+			if strings.Contains(strings.ToLower(d[0]+" "+d[1]), q) {
+				out = append(out, map[string]any{"names": []map[string]string{{"displayName": d[0]}},
+					"emailAddresses": []map[string]string{{"value": d[1]}}})
+			}
+		}
+		write(w, map[string]any{"people": out})
 	case strings.HasPrefix(p, "/people/v1/people/"):
 		id := strings.TrimPrefix(p, "/people/v1/people/")
 		user := "users/" + id

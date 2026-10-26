@@ -662,6 +662,41 @@ func (c *Client) Members(ctx context.Context, space string) ([]string, error) {
 
 // Person resolves "users/123" (or "me") to a name and email through the
 // People API; Chat's user ids are People ids.
+// Person is someone from the Workspace directory.
+type DirPerson struct{ Name, Email string }
+
+// SearchDirectory finds colleagues in your Google Workspace directory by
+// name or address (People API; the directory.readonly scope).
+func (c *Client) SearchDirectory(ctx context.Context, query string) ([]DirPerson, error) {
+	v := url.Values{"query": {query}, "readMask": {"names,emailAddresses"}, "pageSize": {"10"},
+		"sources": {"DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE", "DIRECTORY_SOURCE_TYPE_DOMAIN_CONTACT"}}
+	var r struct {
+		People []struct {
+			Names []struct {
+				DisplayName string `json:"displayName"`
+			} `json:"names"`
+			EmailAddresses []struct {
+				Value string `json:"value"`
+			} `json:"emailAddresses"`
+		} `json:"people"`
+	}
+	if err := c.do(ctx, "GET", c.ppl+"/people:searchDirectoryPeople?"+v.Encode(), nil, &r); err != nil {
+		return nil, err
+	}
+	var out []DirPerson
+	for _, p := range r.People {
+		if len(p.EmailAddresses) == 0 {
+			continue
+		}
+		d := DirPerson{Email: p.EmailAddresses[0].Value}
+		if len(p.Names) > 0 {
+			d.Name = p.Names[0].DisplayName
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
 func (c *Client) Person(ctx context.Context, id string) (resource, name, email string, err error) {
 	id = strings.TrimPrefix(id, "users/")
 	var r struct {

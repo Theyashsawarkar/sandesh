@@ -190,6 +190,15 @@ func (m Model) afterPick(msg pickedFilesMsg) (tea.Model, tea.Cmd) {
 		files = append(files, store.File{Source: tilde(p)})
 	}
 	switch msg.then {
+	case "compose":
+		if m.comp != nil {
+			m.comp.files = append(m.comp.files, files...)
+			m.comp.focus = fFiles
+			m.comp.fileSel = len(m.comp.files) - 1
+			m.comp.applyFocus()
+			m.mode = modeCompose
+		}
+		return m, nil
 	case "review":
 		if m.review != nil {
 			m.review.out.Files = append(m.review.out.Files, files...)

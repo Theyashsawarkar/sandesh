@@ -33,6 +33,7 @@ type App struct {
 	// ChatAppMissing is set once Chat said the Cloud project has no Chat
 	// app: reading works, read state and sending don't.
 	ChatAppMissing atomic.Bool
+	directoryOff   atomic.Bool // the People API said no: don't ask again
 
 	// Progress, when set, hears how a mail sync is going (threads fetched
 	// of total); the setup screen draws its bar from it.

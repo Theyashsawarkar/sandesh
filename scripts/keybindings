@@ -43,6 +43,16 @@
 # keybind: Tmux/sandesh | T | Show today's digest: what came in and what needs you
 # keybind: Tmux/sandesh | ? | Show every key
 # keybind: Tmux/sandesh | q / Esc | Go back, then quit
+# keybind: Tmux/sandesh compose | Tab / Shift+Tab | Move to the next / previous field (Tab first adds what you typed)
+# keybind: Tmux/sandesh compose | Up / Down | Pick a contact from the suggestions
+# keybind: Tmux/sandesh compose | Enter / , | Add the picked contact, or the address you typed
+# keybind: Tmux/sandesh compose | Backspace | Remove the last recipient (in an empty To, Cc or Bcc)
+# keybind: Tmux/sandesh compose | Ctrl+s | Send the mail (after the undo window)
+# keybind: Tmux/sandesh compose | Ctrl+d | Save the mail as a Gmail draft and close it
+# keybind: Tmux/sandesh compose | Ctrl+o | Add files to the mail (fzf picker; x removes one in Files)
+# keybind: Tmux/sandesh compose | Ctrl+e | Edit the whole mail in your editor, then come back
+# keybind: Tmux/sandesh compose | Ctrl+q | Toggle the quoted text under a reply or forward
+# keybind: Tmux/sandesh compose | Esc | Cancel the mail (twice once something is written)
 # keybind: Tmux/sandesh review | y | Send the message you wrote (after the undo window)
 # keybind: Tmux/sandesh review | e | Edit the message again in your editor
 # keybind: Tmux/sandesh review | + | Add a file to the message (attach; fzf picker)

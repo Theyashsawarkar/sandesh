@@ -79,6 +79,12 @@ func (m Model) View() string {
 		right = m.box(pw, bh, "review: y send · e edit · + file · d draft · n discard", m.reviewView(pw-4, bh-2), true, m.styles.c.Accent2)
 	case modeApprove:
 		right = m.box(pw, bh, "an agent wants to send: y send · e edit · n decline · q later", m.approveView(pw-4, bh-2), true, m.styles.c.Peach)
+	case modeCompose:
+		title := "new mail"
+		if m.comp != nil && m.comp.title != "" {
+			title = m.comp.title
+		}
+		right = m.box(pw, bh, title, m.composerView(pw-2, bh-2), true, m.styles.c.Accent)
 	default:
 		right = m.previewBox(pw, bh)
 	}
@@ -239,7 +245,7 @@ func (m Model) helpView(w, h int) string {
 	s := m.styles
 	var groups [][]string
 	for _, k := range Keys {
-		if k.Group == "Review" || k.Group == "Approve" || k.Group == "Setup" {
+		if k.Group == "Review" || k.Group == "Approve" || k.Group == "Setup" || k.Group == "Compose" {
 			continue
 		}
 		if len(groups) == 0 || !strings.EqualFold(stripANSI(groups[len(groups)-1][0]), k.Group) {
@@ -383,7 +389,7 @@ func (m Model) inputView() string {
 func (m Model) footerView() string {
 	s := m.styles
 	modeName := map[mode]string{modeNormal: "normal", modeFilter: "filter", modeAsk: "ask", modeSearch: "search", modeSaveName: "save",
-		modeDraftHint: "draft", modeReview: "review", modeApprove: "approve", modeHelp: "keys", modeChatMsg: "message", modeLink: "link"}[m.mode]
+		modeDraftHint: "draft", modeReview: "review", modeApprove: "approve", modeHelp: "keys", modeChatMsg: "message", modeLink: "link", modeCompose: "compose"}[m.mode]
 	var keys [][2]string
 	switch m.mode {
 	case modeReview:
@@ -393,6 +399,11 @@ func (m Model) footerView() string {
 		}
 	case modeApprove:
 		keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"n", "decline"}, {"q", "later"}}
+	case modeCompose:
+		keys = [][2]string{{"tab", "next"}, {"↑↓", "pick"}, {"ctrl+s", "send"}, {"ctrl+d", "draft"}, {"ctrl+o", "attach"}, {"ctrl+e", "editor"}, {"esc", "cancel"}}
+		if m.comp != nil && m.comp.approveID > 0 {
+			keys = [][2]string{{"tab", "next"}, {"ctrl+s", "keep changes"}, {"ctrl+e", "editor"}, {"esc", "back"}}
+		}
 	case modeFilter, modeAsk, modeSearch, modeSaveName, modeDraftHint, modeLink:
 		keys = [][2]string{{"enter", "done"}, {"esc", "cancel"}, {"ctrl+u", "clear"}}
 	case modeChatMsg:

@@ -32,6 +32,7 @@ const (
 	modeHelp
 	modeChatMsg // typing a chat message in the preview
 	modeLink    // typing a link number after o
+	modeCompose // the compose screen
 )
 
 const (
@@ -98,6 +99,7 @@ type Model struct {
 	toastAt    time.Time
 	undo       *undo
 	review     *review
+	comp       *composer
 	waiting    []store.OutboxItem
 	syncing    bool
 	synced     time.Time
@@ -398,6 +400,7 @@ type editedMsg struct {
 	kind, account, path string
 	base                store.Outgoing
 	approveID           int64
+	toComposer          bool // back to the compose screen, not review
 	err                 error
 }
 type searchMsg struct {
@@ -456,6 +459,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		m.fixView()
+		m.layoutComposer()
 		return m, nil
 	case tickMsg:
 		var cmds []tea.Cmd
@@ -541,14 +545,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.draftFor != nil {
 			r := *msg.draftFor
-			r.out.Body = strings.TrimSpace(msg.text) + "\n\n" + r.out.Body
+			quoted := r.out.Body
+			r.out.Body = strings.TrimSpace(msg.text)
 			m.ai = ""
-			return m, m.editMail(r.account, r.out, 0)
+			return m, m.openComposer(r.account, "reply · drafted by claude", r.out, quoted, 0)
 		}
 		m.ai, m.aiTitle = strings.TrimSpace(msg.text), msg.title
 		return m, nil
 	case editedMsg:
 		return m.afterEdit(msg)
+	case dirTickMsg:
+		return m, m.dirLookup(msg.q)
+	case dirMsg:
+		m.gotDirectory(msg)
+		return m, nil
 	case tea.KeyMsg:
 		nm, cmd := m.key(msg)
 		if mm, ok := nm.(Model); ok {
@@ -586,6 +596,9 @@ func (m *Model) fixView() {
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	s := k.String()
+	if m.mode == modeCompose && m.comp != nil {
+		return m.composerKey(k)
+	}
 	if s == "ctrl+c" {
 		return m, tea.Quit
 	}

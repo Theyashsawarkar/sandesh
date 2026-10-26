@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -594,6 +596,60 @@ func (s *Store) Contacts(account, query string, limit int) ([]Contact, error) {
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// SuggestContacts ranks contacts for autocomplete: a name word or the
+// address starting with what was typed beats a match inside it; then
+// people you write to, then people who write to you, then recent ones.
+func (s *Store) SuggestContacts(account, query string, limit int, skip map[string]bool) ([]Contact, error) {
+	q := strings.ToLower(strings.TrimSpace(query))
+	all, err := s.Contacts(account, q, 300)
+	if err != nil {
+		return nil, err
+	}
+	type scored struct {
+		c Contact
+		s float64
+	}
+	var list []scored
+	for _, c := range all {
+		if skip[strings.ToLower(c.Addr)] || strings.HasPrefix(strings.ToLower(c.Addr), "noreply") || strings.Contains(strings.ToLower(c.Addr), "no-reply") {
+			continue
+		}
+		sc := 0.0
+		name, addr := strings.ToLower(c.Name), strings.ToLower(c.Addr)
+		switch {
+		case q == "":
+		case strings.HasPrefix(name, q) || strings.HasPrefix(addr, q):
+			sc += 30
+		case strings.Contains(" "+name, " "+q) || strings.Contains(addr, "."+q):
+			sc += 20
+		default:
+			sc += 5
+		}
+		sc += 8*math.Log1p(float64(c.Sent)) + 2*math.Log1p(float64(c.Received))
+		if days := time.Since(time.UnixMilli(c.Last)).Hours() / 24; c.Last > 0 && days < 90 {
+			sc += 4 * (1 - days/90)
+		}
+		list = append(list, scored{c, sc})
+	}
+	sort.SliceStable(list, func(i, j int) bool { return list[i].s > list[j].s })
+	var out []Contact
+	for _, x := range list {
+		if len(out) == limit {
+			break
+		}
+		out = append(out, x.c)
+	}
+	return out, nil
+}
+
+// PutContact remembers someone from the directory (no mail counted).
+func (s *Store) PutContact(account, addr, name string) error {
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	_, err := s.db.Exec(`INSERT INTO contacts(account,addr,name) VALUES(?,?,?)
+	  ON CONFLICT(account,addr) DO UPDATE SET name=CASE WHEN contacts.name='' THEN excluded.name ELSE contacts.name END`, account, addr, name)
+	return err
 }
 
 // KnownContact: you have written to this address before.

@@ -260,7 +260,30 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `?` | Show every key |
 | `q` / `Esc` | Go back, then quit |
 
-**Reviewing your message** (after the editor) and **approving an agent's**
+**Writing a mail** (`c`, `r`, `a`, `f`, or `D`): the compose screen opens
+in the right panel. Type a name or part of an address in To, Cc or Bcc and
+your contacts appear, best first: people you write to most, then people who
+write to you, plus colleagues from your Google Workspace directory (needs
+the People API enabled in your Cloud project). Recipients become chips; a
+peach chip is someone you have never written to. A reply's or forward's
+original stays folded under the body. Prefer your editor? `Ctrl+e` opens
+the whole mail in it and brings it back, or set `compose = "editor"`.
+
+| Key | Compose |
+|---|---|
+| `Tab` / `Shift+Tab` | Move to the next / previous field (Tab first adds what you typed) |
+| `Up` / `Down` | Pick a contact from the suggestions |
+| `Enter` / `,` | Add the picked contact, or the address you typed |
+| `Backspace` | Remove the last recipient (in an empty To, Cc or Bcc) |
+| `Ctrl+s` | Send the mail (after the undo window) |
+| `Ctrl+d` | Save the mail as a Gmail draft and close it |
+| `Ctrl+o` | Add files to the mail (fzf picker; x removes one in Files) |
+| `Ctrl+e` | Edit the whole mail in your editor, then come back |
+| `Ctrl+q` | Toggle the quoted text under a reply or forward |
+| `Esc` | Cancel the mail (twice once something is written) |
+
+**Reviewing your message** (chat written in the editor, or mail with
+`compose = "editor"`) and **approving an agent's**
 (`A`, or the popup):
 
 | Key | Review | Approve |
@@ -431,7 +454,8 @@ initial_days  = 30          # how far back the first sync goes
 max_threads   = 150         # at most this many threads on the first sync (older mail: search)
 notify        = true        # desktop notifications for new mail and DMs
 ai_command    = ["claude", "-p"]   # what @, S, D and T run
-# editor      = "nvim"             # default: $VISUAL, $EDITOR, vi
+# editor      = "nvim"             # default: $VISUAL, $EDITOR, else the first one installed
+# compose     = "editor"           # write mail in the editor instead of the compose screen
 # include     = "~/.local/state/varna/sandesh.toml"   # a theme file; its [colors] win
 
 # Sections are the tabs on top. label: a Gmail label id (INBOX, STARRED,

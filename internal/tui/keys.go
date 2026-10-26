@@ -57,6 +57,16 @@ var Keys = []Key{
 	{"Claude", "T", "Show today's digest: what came in and what needs you"},
 	{"Other", "?", "Show every key"},
 	{"Other", "q / Esc", "Go back, then quit"},
+	{"Compose", "Tab / Shift+Tab", "Move to the next / previous field (Tab first adds what you typed)"},
+	{"Compose", "Up / Down", "Pick a contact from the suggestions"},
+	{"Compose", "Enter / ,", "Add the picked contact, or the address you typed"},
+	{"Compose", "Backspace", "Remove the last recipient (in an empty To, Cc or Bcc)"},
+	{"Compose", "Ctrl+s", "Send the mail (after the undo window)"},
+	{"Compose", "Ctrl+d", "Save the mail as a Gmail draft and close it"},
+	{"Compose", "Ctrl+o", "Add files to the mail (fzf picker; x removes one in Files)"},
+	{"Compose", "Ctrl+e", "Edit the whole mail in your editor, then come back"},
+	{"Compose", "Ctrl+q", "Toggle the quoted text under a reply or forward"},
+	{"Compose", "Esc", "Cancel the mail (twice once something is written)"},
 	{"Review", "y", "Send the message you wrote (after the undo window)"},
 	{"Review", "e", "Edit the message again in your editor"},
 	{"Review", "+", "Add a file to the message (attach; fzf picker)"},
@@ -87,6 +97,8 @@ func KeybindLines() string {
 	for _, k := range Keys {
 		scope := "sandesh"
 		switch k.Group {
+		case "Compose":
+			scope = "sandesh compose"
 		case "Review":
 			scope = "sandesh review"
 		case "Approve":

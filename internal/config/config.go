@@ -89,16 +89,19 @@ type Config struct {
 	UndoSeconds int    `toml:"undo_seconds"`
 	// ChatUndoSeconds is the undo window for chat messages: none by
 	// default, chat should feel instant
-	ChatUndoSeconds int       `toml:"chat_undo_seconds"`
-	MailInterval    duration  `toml:"mail_interval"`
-	ChatInterval    duration  `toml:"chat_interval"`
-	InitialDays     int       `toml:"initial_days"`
-	MaxThreads      int       `toml:"max_threads"`
-	Notify          bool      `toml:"notify"`
-	AICommand       []string  `toml:"ai_command"`
-	Editor          string    `toml:"editor"`
-	Sections        []Section `toml:"section"`
-	Colors          Colors    `toml:"colors"`
+	ChatUndoSeconds int      `toml:"chat_undo_seconds"`
+	MailInterval    duration `toml:"mail_interval"`
+	ChatInterval    duration `toml:"chat_interval"`
+	InitialDays     int      `toml:"initial_days"`
+	MaxThreads      int      `toml:"max_threads"`
+	Notify          bool     `toml:"notify"`
+	AICommand       []string `toml:"ai_command"`
+	Editor          string   `toml:"editor"`
+	// Compose is "screen" (the built-in compose screen) or "editor"
+	// (write the whole mail in $EDITOR)
+	Compose  string    `toml:"compose"`
+	Sections []Section `toml:"section"`
+	Colors   Colors    `toml:"colors"`
 	// Include is a theme file read after this one (varna writes
 	// ~/.local/state/varna/sandesh.toml); its [colors] win.
 	Include string `toml:"include"`
@@ -227,7 +230,8 @@ initial_days  = 30     # how far back the first sync goes
 max_threads   = 150    # at most this many threads on the first sync (older mail: search)
 notify        = true   # desktop notification for new mail and DMs
 ai_command    = ["claude", "-p"]   # what @, S, D and T run
-# editor      = "nvim"             # default: $VISUAL, $EDITOR, vi
+# editor      = "nvim"             # default: $VISUAL, $EDITOR, else the first one installed
+# compose     = "editor"           # write mail in the editor instead of the compose screen
 
 # Colours follow varna's desktop theme (~/.local/state/varna/palette.json)
 # and change live with it. Set any of them here to override, or include a

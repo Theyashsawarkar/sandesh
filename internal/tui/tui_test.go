@@ -73,6 +73,12 @@ func press(m Model, keys ...string) Model {
 			msg = tea.KeyMsg{Type: tea.KeyEnter}
 		case "esc":
 			msg = tea.KeyMsg{Type: tea.KeyEsc}
+		case "ctrl+s":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlS}
+		case "down":
+			msg = tea.KeyMsg{Type: tea.KeyDown}
+		case "backspace":
+			msg = tea.KeyMsg{Type: tea.KeyBackspace}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 		}
@@ -109,5 +115,88 @@ func TestScreen(t *testing.T) {
 	m = press(m, "esc", "l")
 	if chatSections[m.sec] != "Unread" || len(m.spaces) != 2 {
 		t.Fatalf("chat Unread section: %d", len(m.spaces))
+	}
+}
+
+func typeText(m Model, s string) Model {
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)})
+	return nm.(Model)
+}
+
+func TestComposer(t *testing.T) {
+	m := model(t)
+	m.a.Config.UndoSeconds = 60
+	m = press(m, "c")
+	if m.mode != modeCompose || !strings.Contains(m.View(), "new mail") {
+		t.Fatal("c should open the compose screen")
+	}
+	// autocomplete from contacts: Tab takes the suggestion
+	m = typeText(m, "pri")
+	if len(m.comp.sugg) == 0 || m.comp.sugg[0].Addr != "priya.k@example.com" || !strings.Contains(m.View(), "Priya Kulkarni") {
+		t.Fatalf("suggestions: %+v", m.comp.sugg)
+	}
+	m = press(m, "tab")
+	// the directory: found after typing pauses, picked with ↓ Enter
+	m = typeText(m, "kav")
+	nm, cmd := m.Update(dirTickMsg{"kav"})
+	m = nm.(Model)
+	if cmd == nil {
+		t.Fatal("no directory lookup")
+	}
+	nm, _ = m.Update(cmd())
+	m = nm.(Model)
+	if len(m.comp.sugg) == 0 || m.comp.sugg[0].Addr != "kavya.i@example.com" {
+		t.Fatalf("directory suggestions: %+v", m.comp.sugg)
+	}
+	m = press(m, "enter")
+	// a typed address, then Backspace on an empty field drops the last chip
+	m = typeText(m, "x@y.example")
+	m = press(m, ",", "backspace")
+	if got := len(m.comp.rcpt[fTo]); got != 2 {
+		t.Fatalf("recipients: %+v", m.comp.rcpt[fTo])
+	}
+	m = press(m, "tab", "tab", "tab")
+	m = typeText(m, "Release plan")
+	m = press(m, "tab", "tab")
+	m = typeText(m, "Thursday works.")
+	m = press(m, "ctrl+s")
+	if m.mode != modeNormal {
+		t.Fatalf("not sent: %s", m.err)
+	}
+	q, _ := m.a.Store.Outbox(store.StatusQueued)
+	if len(q) != 1 {
+		t.Fatalf("outbox: %+v", q)
+	}
+	out := q[0].Out
+	if strings.Join(out.To, "|") != `"Priya Kulkarni" <priya.k@example.com>|"Kavya Iyer" <kavya.i@example.com>` ||
+		out.Subject != "Release plan" || out.Body != "Thursday works." {
+		t.Fatalf("queued: %+v", out)
+	}
+
+	// a reply: recipients and thread filled in, the quote kept under
+	m = press(m, "g", "r")
+	if m.mode != modeCompose || m.comp.focus != fBody || !strings.Contains(m.View(), "quoted lines") {
+		t.Fatalf("reply composer: focus %d", m.comp.focus)
+	}
+	m = typeText(m, "Yes.")
+	m = press(m, "ctrl+s")
+	q, _ = m.a.Store.Outbox(store.StatusQueued)
+	r := q[0].Out
+	if r.ThreadID != "t-priya" || !strings.HasPrefix(r.Body, "Yes.\n\nOn ") || !strings.Contains(r.Body, "> ") {
+		t.Fatalf("reply: %+v", r)
+	}
+
+	// Esc: once warns when something is written, twice discards
+	m = press(m, "c")
+	m = typeText(m, "draft text")
+	m = press(m, "tab", "tab", "tab", "tab", "tab")
+	m = typeText(m, "unsent")
+	m = press(m, "esc")
+	if m.mode != modeCompose {
+		t.Fatal("one Esc discarded a written message")
+	}
+	m = press(m, "esc")
+	if m.mode != modeNormal {
+		t.Fatal("second Esc should discard")
 	}
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/Theyashsawarkar/sandesh/internal/google"
+	"github.com/Theyashsawarkar/sandesh/internal/mime"
 
 	"context"
 	"encoding/json"
@@ -107,6 +108,30 @@ func (a *App) MarkSpaceUnread(ctx context.Context, account, space string) error 
 		return nil
 	}
 	return err
+}
+
+// SearchDirectory looks colleagues up in the Workspace directory and keeps
+// them as contacts. Without the People API it fails once and then stays
+// quiet for the rest of the run (ok=false).
+func (a *App) SearchDirectory(ctx context.Context, account, query string) (found []store.Contact, ok bool) {
+	if a.directoryOff.Load() {
+		return nil, false
+	}
+	c, err := a.Client(account)
+	if err != nil {
+		return nil, false
+	}
+	people, err := c.SearchDirectory(ctx, query)
+	if err != nil {
+		a.directoryOff.Store(true)
+		return nil, false
+	}
+	for _, p := range people {
+		name, addr := mime.Clean(p.Name), mime.Clean(p.Email)
+		_ = a.Store.PutContact(account, addr, name)
+		found = append(found, store.Contact{Name: name, Addr: addr})
+	}
+	return found, true
 }
 
 // ---------------------------------------------------------------- sections

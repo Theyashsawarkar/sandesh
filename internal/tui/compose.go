@@ -45,9 +45,13 @@ func (m *Model) editMail(account string, out store.Outgoing, approveID int64) te
 	}
 	base := out
 	base.Body = ""
-	return tea.ExecProcess(cli.EditorCmd(m.a, path), func(err error) tea.Msg {
+	return execEditor(m, path, func(err error) tea.Msg {
 		return editedMsg{kind: "mail", account: account, path: path, base: base, approveID: approveID, err: err}
 	})
+}
+
+func execEditor(m *Model, path string, done func(error) tea.Msg) tea.Cmd {
+	return tea.ExecProcess(cli.EditorCmd(m.a, path), done)
 }
 
 func (m *Model) editChat(account string, out store.Outgoing, approveID int64) tea.Cmd {
@@ -75,6 +79,11 @@ func (m Model) afterEdit(msg editedMsg) (tea.Model, tea.Cmd) {
 	}
 	out := msg.base
 	ok := false
+	if msg.toComposer {
+		edited, _ := cli.ParseMailTemplate(string(b), msg.base)
+		m.composerFromEditor(edited)
+		return m, nil
+	}
 	if msg.kind == "chat" {
 		out.Body, ok = cli.ParseChatTemplate(string(b))
 	} else {
@@ -122,7 +131,7 @@ func (m *Model) compose() tea.Cmd {
 	if acc == "" {
 		return nil
 	}
-	return m.editMail(acc, store.Outgoing{}, 0)
+	return m.openComposer(acc, "new mail", store.Outgoing{}, "", 0)
 }
 
 func (m *Model) replyCmd(key string) tea.Cmd {
@@ -143,23 +152,20 @@ func (m *Model) replyCmd(key string) tea.Cmd {
 	}
 	acc, _ := m.a.Store.Account(t.Account)
 	var out store.Outgoing
-	if key == "f" {
+	title := "reply · " + t.Subject
+	switch key {
+	case "f":
 		out = cli.Forward(t, m.msgs)
-		out.Body = "\n\n" + out.Body
-	} else {
-		out = cli.ReplyTo(acc, t, m.msgs, key == "a")
-		out.Body = "\n\n" + out.Body
+		title = "forward · " + t.Subject
+	case "a":
+		out = cli.ReplyTo(acc, t, m.msgs, true)
+		title = "reply all · " + t.Subject
+	default:
+		out = cli.ReplyTo(acc, t, m.msgs, false)
 	}
-	path, err := cli.TempFile(m.a, "eml", cli.MailTemplate(out, ""))
-	if err != nil {
-		m.err = err.Error()
-		return nil
-	}
-	base := out
-	base.Body = ""
-	return tea.ExecProcess(cli.EditorCmd(m.a, path), func(err error) tea.Msg {
-		return editedMsg{kind: "mail", account: t.Account, path: path, base: base, err: err}
-	})
+	quoted := out.Body
+	out.Body = ""
+	return m.openComposer(t.Account, title, out, quoted, 0)
 }
 
 func (m Model) reviewKey(s string) (tea.Model, tea.Cmd) {
@@ -182,7 +188,11 @@ func (m Model) reviewKey(s string) (tea.Model, tea.Cmd) {
 		if r.kind == "chat" {
 			return m, m.editChat(r.account, r.out, 0)
 		}
-		return m, m.editMail(r.account, r.out, 0)
+		body, quoted := splitQuoted(r.out.Body)
+		out := r.out
+		out.Body = body
+		m.review = nil
+		return m, m.openComposer(r.account, "edit", out, quoted, 0)
 	case "d":
 		if r.kind != "mail" {
 			return m, nil
@@ -230,7 +240,13 @@ func (m Model) approveKey(s string) (tea.Model, tea.Cmd) {
 		if it.Kind == "chat" {
 			return m, m.editChat(it.Account, it.Out, it.ID)
 		}
-		return m, m.editMail(it.Account, it.Out, it.ID)
+		if it.Kind == "mail" {
+			body, quoted := splitQuoted(it.Out.Body)
+			out := it.Out
+			out.Body = body
+			return m, m.openComposer(it.Account, "edit the agent's message", out, quoted, it.ID)
+		}
+		return m, m.editChat(it.Account, it.Out, it.ID)
 	case "q", "esc":
 		m.mode = modeNormal
 		return m, nil

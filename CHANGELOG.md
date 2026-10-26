@@ -4,6 +4,15 @@ Newest first.
 
 ## Unreleased
 
+- **A compose screen**: `c`, `r`, `a`, `f` and `D` open a form in the right
+  panel instead of a bare file in the editor: From, To, Cc, Bcc as chips,
+  Subject, Files and the body, with a reply's quote folded underneath.
+  Recipients autocomplete from your contacts (ranked by how often you write
+  to them) and from your Google Workspace directory (People API). `Ctrl+s`
+  sends, `Ctrl+d` saves a draft, `Ctrl+o` attaches, `Ctrl+e` still takes
+  the whole mail to your editor and back; `compose = "editor"` keeps the
+  old way. An agent's message is edited here too.
+
 - **Syncs ~10× cheaper**: a sync with nothing new went from 23 Google calls
   (12.6 s) to 2 (1.1 s) on a real account. Lookups that fail (a DM's title, a
   person's name) are remembered and retried every 6 hours instead of on
