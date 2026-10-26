@@ -947,9 +947,9 @@ func (m Model) composerView(w, h int) string {
 	}
 	btn := func(k, label string, primary bool) string {
 		if primary {
-			return lipgloss.NewStyle().Background(lipgloss.Color(s.c.Accent)).Foreground(lipgloss.Color(s.c.Base)).Bold(true).Padding(0, 1).Render(k + " " + label)
+			return s.round(s.pill, k+" "+label)
 		}
-		return s.keycap.Render(k) + s.muted.Render(" "+label)
+		return s.round(s.keycap, k) + s.muted.Render(" "+label)
 	}
 	buttons := []string{btn("ctrl+s", "send", true), btn("ctrl+d", "draft", false), btn("ctrl+e", "nvim", false), btn("esc", "discard", false)}
 	if c.approveID > 0 {

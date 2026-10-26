@@ -535,7 +535,8 @@ func (m *Model) chatLines(w int) []string {
 			first[c.Thread] = c.Name
 		}
 	}
-	mention := lipgloss.NewStyle().Background(lipgloss.Color(s.c.Accent)).Foreground(lipgloss.Color(s.c.Base))
+	mentionStyle := lipgloss.NewStyle().Background(lipgloss.Color(s.c.Accent)).Foreground(lipgloss.Color(s.c.Base))
+	mention := func(t string) string { return s.round(mentionStyle, t) }
 	var out []string
 	var lastDay string
 	bw := max(20, w*4/5)
@@ -619,12 +620,12 @@ func hash(s string) int {
 }
 
 // styleMentions colours @names in a plain line.
-func styleMentions(l string, text, mention lipgloss.Style) string {
+func styleMentions(l string, text lipgloss.Style, mention func(string) string) string {
 	var b strings.Builder
 	last := 0
 	for _, ix := range reMention.FindAllStringIndex(l, -1) {
 		b.WriteString(text.Render(l[last:ix[0]]))
-		b.WriteString(mention.Render(l[ix[0]:ix[1]]))
+		b.WriteString(mention(l[ix[0]:ix[1]]))
 		last = ix[1]
 	}
 	b.WriteString(text.Render(l[last:]))

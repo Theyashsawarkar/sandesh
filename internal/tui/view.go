@@ -19,9 +19,21 @@ type styles struct {
 	text, sub, muted, accent, accent2, bold, warn lipgloss.Style
 	green, blue, yellow, red, peach               lipgloss.Style
 	tabOn, tabOff, sel, pill, keycap, banner      lipgloss.Style
+	nerd                                          bool // round ends from Nerd Font half circles
 }
 
-func newStyles(c config.Colors) styles {
+// round renders a filled label with round ends (Nerd Font half circles
+// in the fill colour) instead of square ones; plain when there's no
+// Nerd Font.
+func (s styles) round(st lipgloss.Style, text string) string {
+	if !s.nerd {
+		return st.Render(text)
+	}
+	cap := lipgloss.NewStyle().Foreground(st.GetBackground())
+	return cap.Render("\ue0b6") + st.UnsetPadding().Render(text) + cap.Render("\ue0b4")
+}
+
+func newStyles(c config.Colors, nerd bool) styles {
 	fg := func(col string) lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color(col)) }
 	return styles{
 		c: c, text: fg(c.Text), sub: fg(c.Subtle), muted: fg(c.Muted), accent: fg(c.Accent), accent2: fg(c.Accent2),
@@ -32,6 +44,7 @@ func newStyles(c config.Colors) styles {
 		pill:   lipgloss.NewStyle().Foreground(lipgloss.Color(c.Base)).Background(lipgloss.Color(c.Accent)).Bold(true).Padding(0, 1),
 		keycap: lipgloss.NewStyle().Foreground(lipgloss.Color(c.Text)).Background(lipgloss.Color(c.Surface)).Padding(0, 1),
 		banner: lipgloss.NewStyle().Foreground(lipgloss.Color(c.Base)).Background(lipgloss.Color(c.Peach)).Bold(true).Padding(0, 1),
+		nerd:   nerd,
 	}
 }
 
@@ -99,7 +112,7 @@ func (m Model) View() string {
 		rows[len(rows)-1] = overlay(rows[len(rows)-1], m.finderView(), m.w)
 	}
 	if len(m.waiting) > 0 && m.mode != modeApprove {
-		rows = append(rows, m.styles.banner.Render(fmt.Sprintf("󰀦 %d send(s) from an agent wait for your approval · press A", len(m.waiting))))
+		rows = append(rows, m.styles.round(m.styles.banner, fmt.Sprintf("󰀦 %d send(s) from an agent wait for your approval · press A", len(m.waiting))))
 	}
 	if m.err != "" {
 		e := m.styles.red.Render("● " + m.err)
@@ -122,13 +135,13 @@ func (m Model) tabsView() string {
 				label += fmt.Sprintf(" %d", n)
 			}
 			if i == m.sec && m.search == nil {
-				parts = append(parts, s.tabOn.Render(label))
+				parts = append(parts, s.round(s.tabOn, label))
 			} else {
 				parts = append(parts, s.tabOff.Render(label))
 			}
 		}
 		if m.search != nil {
-			parts = append(parts, s.tabOn.Render(m.search.Name))
+			parts = append(parts, s.round(s.tabOn, m.search.Name))
 		}
 		chat := "Chat"
 		if m.chatN > 0 {
@@ -147,7 +160,7 @@ func (m Model) tabsView() string {
 				label += fmt.Sprintf(" %d", m.chatN)
 			}
 			if i == m.sec {
-				parts = append(parts, s.tabOn.Render(label))
+				parts = append(parts, s.round(s.tabOn, label))
 			} else {
 				parts = append(parts, s.tabOff.Render(label))
 			}
@@ -439,9 +452,9 @@ func (m Model) footerView() string {
 				{"m/M", "read/unread"}, {"@", "ask"}, {"S", "summary"}, {"?", "keys"}}
 		}
 	}
-	left := s.pill.Render(modeName)
+	left := s.round(s.pill, modeName)
 	for _, k := range keys {
-		left += " " + s.keycap.Render(k[0]) + s.muted.Render(" "+k[1])
+		left += " " + s.round(s.keycap, k[0]) + s.muted.Render(" "+k[1])
 	}
 	right := ""
 	if m.toast != "" {

@@ -4,6 +4,10 @@ Newest first.
 
 ## Unreleased
 
+- **Round ends on every filled label**: @mentions in chat, the active tab,
+  the mode label, key hints, the send button and the approval banner use
+  Nerd Font half circles like the avatars (`nerd_font = false` keeps square).
+
 - **A search window**: `/` (or `s`) opens a floating search over the
   screen. Mail and chat from this machine show as you type, matches
   highlighted, with a preview of the highlighted result; when typing pauses,

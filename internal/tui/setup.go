@@ -77,7 +77,7 @@ type firstSyncMsg struct{ err error }
 type progressMsg [2]int
 
 func newSetup(a *app.App, launch string) setup {
-	s := setup{a: a, launch: launch, styles: newStyles(a.Config.Colors), name: "work", chat: true}
+	s := setup{a: a, launch: launch, styles: newStyles(a.Config.Colors, a.Config.NerdFont), name: "work", chat: true}
 	if a.HasClient() {
 		s.step = stepAccount
 		s.client = describeClient(a.Paths.ClientFile())
@@ -530,7 +530,7 @@ func (s setup) View() string {
 		}
 	}
 	b = append(b, strings.Join(parts, st.muted.Render("  ──  ")), "")
-	kc := func(k, d string) string { return st.keycap.Render(k) + " " + st.sub.Render(d) }
+	kc := func(k, d string) string { return st.round(st.keycap, k) + " " + st.sub.Render(d) }
 	field := func(label, text string) []string {
 		box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(st.c.Accent)).Width(inner-2).Padding(0, 1)
 		return strings.Split(box.Render(st.muted.Render(label+"  ")+st.text.Render(ansi.TruncateLeft(text, max(0, lipgloss.Width(text)-(inner-len(label)-8)), "…"))+st.accent.Render("▏")), "\n")

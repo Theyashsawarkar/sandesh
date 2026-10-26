@@ -121,7 +121,7 @@ type Model struct {
 }
 
 func New(a *app.App, launch string) Model {
-	m := Model{a: a, launch: launch, styles: newStyles(a.Config.Colors), acct: -1, selected: map[string]bool{}, counts: map[string]int{}, noOlder: map[string]bool{}, olderN: a.Config.OlderPage,
+	m := Model{a: a, launch: launch, styles: newStyles(a.Config.Colors, a.Config.NerdFont), acct: -1, selected: map[string]bool{}, counts: map[string]int{}, noOlder: map[string]bool{}, olderN: a.Config.OlderPage,
 		expanded: map[string]bool{}}
 	m.sections = a.Sections()
 	m.accounts = a.AccountNames()
@@ -442,7 +442,7 @@ func (m *Model) recolour() {
 	if c, err := config.Load(m.a.Paths); err == nil {
 		m.a.Config.Colors = c.Colors
 		m.a.Config.Include = c.Include
-		m.styles = newStyles(c.Colors)
+		m.styles = newStyles(c.Colors, m.a.Config.NerdFont)
 		m.fixView()
 	}
 }
