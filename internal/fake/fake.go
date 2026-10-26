@@ -415,13 +415,17 @@ func without(l []string, x string) []string {
 // and `sandesh demo`. The people are made up.
 func (s *Server) Seed() {
 	now := time.Now()
+	// today's examples at their clock times once the day is past 10:00;
+	// earlier (or in CI, in any timezone) squeezed into the part of today
+	// that has passed, in the same order, so they're never in the future
+	y, mo, d := now.Date()
+	midnight := time.Date(y, mo, d, 0, 0, 0, 0, time.Local)
 	today := func(h, m int) time.Time {
-		y, mo, d := now.Date()
-		t := time.Date(y, mo, d, h, m, 0, 0, time.Local)
-		if t.After(now) {
-			t = now.Add(-time.Duration(30-m%30) * time.Minute)
+		t := midnight.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute)
+		if now.Sub(midnight) >= 10*time.Hour {
+			return t
 		}
-		return t
+		return midnight.Add(time.Duration(float64(now.Sub(midnight)) * float64(h*60+m) / (10 * 60)))
 	}
 	s.People["users/2"] = [2]string{"Priya Kulkarni", "priya.k@example.com"}
 	s.People["users/3"] = [2]string{"Arjun Mehta", "arjun.m@example.com"}
