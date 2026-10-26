@@ -2,7 +2,7 @@
 # (keybind-search.py reads ~/.tmux/plugins/*/scripts). Generated from
 # internal/tui/keys.go by `go test ./internal/tui -update`; don't edit.
 # keybind: Tmux/sandesh | j / k | Move to the next / previous thread or space (j at the end loads older mail)
-# keybind: Tmux/sandesh | + / - | Change how many older mails j at the end loads (10, 25, 50, 100)
+# keybind: Tmux/sandesh | + / - | Set how many older mails j at the end loads (10, 25, 50, 100)
 # keybind: Tmux/sandesh | g / G | Jump to the first / last
 # keybind: Tmux/sandesh | h / l | Switch to the previous / next section
 # keybind: Tmux/sandesh | Tab | Switch between mail and chat

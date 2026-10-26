@@ -203,7 +203,7 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | Key | Does |
 |---|---|
 | `j` / `k` | Move to the next / previous thread or space (j at the end loads older mail) |
-| `+` / `-` | Change how many older mails j at the end loads (10, 25, 50, 100) |
+| `+` / `-` | Set how many older mails j at the end loads (10, 25, 50, 100) |
 | `g` / `G` | Jump to the first / last |
 | `h` / `l` | Switch to the previous / next section |
 | `Tab` | Switch between mail and chat |

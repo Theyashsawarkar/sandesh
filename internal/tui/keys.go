@@ -16,7 +16,7 @@ type Key struct {
 
 var Keys = []Key{
 	{"Move", "j / k", "Move to the next / previous thread or space (j at the end loads older mail)"},
-	{"Move", "+ / -", "Change how many older mails j at the end loads (10, 25, 50, 100)"},
+	{"Move", "+ / -", "Set how many older mails j at the end loads (10, 25, 50, 100)"},
 	{"Move", "g / G", "Jump to the first / last"},
 	{"Move", "h / l", "Switch to the previous / next section"},
 	{"Move", "Tab", "Switch between mail and chat"},
