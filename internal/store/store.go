@@ -754,7 +754,8 @@ func (s *Store) Spaces(accounts []string, me map[string]string) ([]Space, error)
 	q := `SELECT s.account,s.name,s.display_name,s.type,s.last_active,s.last_read,s.synced_to,
 	  (SELECT COUNT(*) FROM chat_messages c JOIN accounts a ON a.name=c.account WHERE c.account=s.account AND c.space=s.name AND c.created>s.last_read AND c.sender<>a.chat_user),
 	  COALESCE((SELECT c.text FROM chat_messages c WHERE c.account=s.account AND c.space=s.name ORDER BY c.created DESC LIMIT 1),''),
-	  COALESCE((SELECT c.sender_name FROM chat_messages c WHERE c.account=s.account AND c.space=s.name ORDER BY c.created DESC LIMIT 1),'')
+	  COALESCE((SELECT CASE WHEN c.sender<>'' AND c.sender=(SELECT chat_user FROM accounts WHERE name=s.account) THEN 'You' ELSE c.sender_name END
+	    FROM chat_messages c WHERE c.account=s.account AND c.space=s.name ORDER BY c.created DESC LIMIT 1),'')
 	  FROM spaces s`
 	var args []any
 	if len(accounts) > 0 {

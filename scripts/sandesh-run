@@ -2,13 +2,16 @@
 # Runs sandesh for the tmux plugin: the one on PATH, else the copy built in
 # this plugin's folder (bin/sandesh), building it with Go the first time.
 dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-if command -v sandesh >/dev/null 2>&1; then
-  exec sandesh "$@"
-fi
-if [ ! -x "$dir/bin/sandesh" ] || [ "$dir/go.mod" -nt "$dir/bin/sandesh" ]; then
+# tmux's environment often lacks ~/.local/bin and ~/go/bin: look there too
+for bin in "$(command -v sandesh 2>/dev/null)" "$HOME/.local/bin/sandesh" "${GOBIN:-$HOME/go/bin}/sandesh"; do
+  if [ -n "$bin" ] && [ -x "$bin" ]; then exec "$bin" "$@"; fi
+done
+# the copy built here: rebuilt whenever the plugin's code is newer (TPM update)
+stale() { [ ! -x "$dir/bin/sandesh" ] || [ -n "$(find "$dir/cmd" "$dir/internal" "$dir/go.mod" -newer "$dir/bin/sandesh" -print -quit 2>/dev/null)" ]; }
+if stale; then
   if [ "${1:-}" = status ]; then exit 0; fi   # never build from the status line
   if command -v go >/dev/null 2>&1; then
-    echo "Building sandesh (first run)..."
+    echo "Building sandesh..."
     (cd "$dir" && go build -o bin/sandesh ./cmd/sandesh) || { echo "Build failed."; read -rn1; exit 1; }
   else
     echo "sandesh isn't installed: see https://github.com/Theyashsawarkar/sandesh#install"

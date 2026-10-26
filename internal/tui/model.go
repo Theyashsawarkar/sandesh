@@ -103,6 +103,7 @@ type Model struct {
 	synced     time.Time
 	err        string
 	errAt      time.Time
+	atBottom   bool // the preview is scrolled to its end
 	themeStamp string
 	lastSync   time.Time
 }
@@ -217,7 +218,11 @@ func (m *Model) reload() {
 		}
 	}
 	m.clamp()
+	follow := m.tab == tabChat && m.atBottom
 	m.loadPreview(m.curKey != keep)
+	if follow {
+		m.scroll = 1 << 30 // new messages: stay at the bottom, like a chat app
+	}
 	m.fixView()
 }
 
@@ -540,7 +545,9 @@ func (m *Model) fixView() {
 	if _, ok := m.curSpace(); ok {
 		avail -= 2
 	}
-	m.scroll = max(0, min(m.scroll, len(m.preview)-max(3, avail)))
+	bottom := max(0, len(m.preview)-max(3, avail))
+	m.scroll = max(0, min(m.scroll, bottom))
+	m.atBottom = m.scroll >= bottom
 }
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {

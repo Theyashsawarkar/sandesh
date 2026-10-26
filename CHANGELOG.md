@@ -4,6 +4,15 @@ Newest first.
 
 ## Unreleased
 
+- **The tmux popup runs the current sandesh**: tmux's environment often lacks
+  `~/.local/bin`, so the plugin fell back to a copy built once in its own
+  folder and kept running it after updates. It now looks in `~/.local/bin`
+  and `~/go/bin` too, and rebuilds its own copy whenever the code is newer.
+- **New chat messages show up**: a conversation scrolled to the bottom stays
+  at the bottom when messages arrive, like a chat app; before, they landed
+  below the visible part. The space list says "You:" for your own last
+  message.
+
 - **Files, both ways**: `v` saves a mail's attachments or a chat's files to
   `~/Downloads/sandesh` (an fzf picker when there are several), `V` saves
   and opens them. Send files with `Attach:` in the mail editor, `+` on the
