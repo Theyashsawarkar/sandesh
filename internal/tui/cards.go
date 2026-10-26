@@ -523,6 +523,7 @@ var reMention = regexp.MustCompile(`@[\p{L}\p{N}_.-]+`)
 // sender (name and time once, then each message behind a coloured bar);
 // yours sit on the right with a green bar.
 func (m *Model) chatLines(w int) []string {
+	m.chatMsgLine = map[string]int{}
 	s := m.styles
 	if len(m.chatMsgs) == 0 {
 		return []string{s.muted.Render("No recent messages synced.")}
@@ -577,6 +578,7 @@ func (m *Model) chatLines(w int) []string {
 			out = append(out, head)
 		}
 		for _, g := range m.chatMsgs[i:j] {
+			m.chatMsgLine[g.Name] = len(out)
 			var lines []string
 			if first[g.Thread] != g.Name {
 				lines = append(lines, s.muted.Render("↳ reply in a thread"))
@@ -595,11 +597,15 @@ func (m *Model) chatLines(w int) []string {
 				lines = append(lines, s.muted.Render(fmt.Sprintf("↳ %d %s in this thread", threadCount[g.Thread]-1,
 					map[bool]string{true: "reply", false: "replies"}[threadCount[g.Thread] == 2])))
 			}
+			gbar := bar
+			if g.Name == m.flashMsg {
+				gbar = s.accent.Bold(true).Render("▶") // the one search opened
+			}
 			for _, l := range lines {
 				if c.Mine {
-					out = append(out, padLeft(l+" "+bar, w))
+					out = append(out, padLeft(l+" "+gbar, w))
 				} else {
-					out = append(out, m.indent()+bar+" "+l)
+					out = append(out, m.indent()+gbar+" "+l)
 				}
 			}
 		}

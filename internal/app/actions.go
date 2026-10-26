@@ -330,7 +330,7 @@ func (a *App) LoadOlder(ctx context.Context, account string, sec config.Section,
 
 // SearchServer runs a Gmail search on the server, caches the threads it
 // finds and returns them (newest first).
-func (a *App) SearchServer(ctx context.Context, account, query string, max int) ([]store.Thread, error) {
+func (a *App) SearchServer(ctx context.Context, account, query string, max int, labels ...string) ([]store.Thread, error) {
 	acc, err := a.Store.Account(account)
 	if err != nil {
 		return nil, err
@@ -339,7 +339,7 @@ func (a *App) SearchServer(ctx context.Context, account, query string, max int) 
 	if err != nil {
 		return nil, err
 	}
-	ids, err := c.ListThreads(ctx, query, nil, max)
+	ids, err := c.ListThreads(ctx, query, labels, max)
 	if err != nil {
 		return nil, err
 	}

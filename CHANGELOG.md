@@ -4,6 +4,15 @@ Newest first.
 
 ## Unreleased
 
+- **Search no longer freezes the screen**: a one-letter search took ~5 s on a
+  real mailbox (the full-text index was queried once per thread); it is now
+  one lookup (~20-50 ms), and it runs in the background after a short pause
+  in typing, with stale answers dropped and Gmail's search cancelled when
+  you type on. Previews are drawn in the background, once.
+- **Search where you are**: a mail section searches that section (Today,
+  Sent, Inbox...), a chat space searches that space; Tab widens to all mail
+  or every chat. Opening a chat result scrolls to the message and marks it.
+
 - **`?` is a window**: every key, grouped in columns in the middle of the
   screen, with a filter as you type.
 - **A file picker of its own** (replacing fzf): a window over the screen

@@ -43,3 +43,36 @@ func TestTimingOnRealData(t *testing.T) {
 	timeit("recolour check", 50, func() { m.recolour() })
 	timeit("DaemonRunning", 50, func() { a.DaemonRunning() })
 }
+
+func TestSearchTimingOnRealData(t *testing.T) {
+	if os.Getenv("BENCH_HOME") == "" {
+		t.Skip()
+	}
+	t.Setenv("SANDESH_HOME", os.Getenv("BENCH_HOME"))
+	t.Setenv("SANDESH_GOOGLE_URL", "")
+	a, err := app.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	m := New(a, "work")
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 200, Height: 50})
+	m = mm.(Model)
+	m.openFinder()
+	for _, q := range []string{"s", "re", "release", "naeem", "deploy build"} {
+		m.find.input.SetValue(q)
+		m.findChanged()
+		s := time.Now()
+		cmd := m.findLocal(m.find.seq)
+		if cmd != nil {
+			nm, _ := m.Update(cmd())
+			m = nm.(Model)
+		}
+		t.Logf("local %-14q %4d results  %v", q, m.find.count(), time.Since(s))
+	}
+	s := time.Now()
+	for i := 0; i < 20; i++ {
+		_ = m.View()
+	}
+	t.Logf("View with the window open: %v", time.Since(s)/20)
+}

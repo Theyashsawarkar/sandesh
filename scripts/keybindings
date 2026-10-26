@@ -13,7 +13,7 @@
 # keybind: Tmux/sandesh | Q | Toggle the quoted text in the thread
 # keybind: Tmux/sandesh | o | Open a link from the preview by its number
 # keybind: Tmux/sandesh | Ctrl+d / Ctrl+u | Scroll the preview half a page down / up
-# keybind: Tmux/sandesh | / or s | Open the search window: mail and chat here at once, then Gmail's own results
+# keybind: Tmux/sandesh | / or s | Open the search window (searches where you are: this section, or this chat)
 # keybind: Tmux/sandesh | W | Save the current search as a section
 # keybind: Tmux/sandesh | X | Remove the current saved-search section
 # keybind: Tmux/sandesh | u | Switch account (all, then each one)
@@ -61,7 +61,7 @@
 # keybind: Tmux/sandesh compose | Esc | Cancel the mail (twice once something is written)
 # keybind: Tmux/sandesh search | Up / Down | Move between the results (Ctrl+p / Ctrl+n too)
 # keybind: Tmux/sandesh search | Enter | Open the result (mail results stay listed as a search section)
-# keybind: Tmux/sandesh search | Tab | Jump between the mail and chat results
+# keybind: Tmux/sandesh search | Tab | Switch where it looks: this section or all mail, this chat or every chat
 # keybind: Tmux/sandesh search | Ctrl+u | Clear the search
 # keybind: Tmux/sandesh search | Esc | Close the search window
 # keybind: Tmux/sandesh review | y | Send the message you wrote (after the undo window)

@@ -477,7 +477,8 @@ func (s *Store) Threads(q ThreadQuery) ([]Thread, error) {
 		where = append(where, "t.labels LIKE '%,UNREAD,%'")
 	}
 	if q.Text != "" {
-		where = append(where, "EXISTS (SELECT 1 FROM messages_fts f WHERE f.account=t.account AND f.thread_id=t.id AND messages_fts MATCH ?)")
+		// one lookup in the index, not one per thread (that took seconds)
+		where = append(where, "(t.account, t.id) IN (SELECT account, thread_id FROM messages_fts WHERE messages_fts MATCH ?)")
 		args = append(args, ftsQuery(q.Text))
 	}
 	sqlq := `SELECT ` + strings.ReplaceAll("t."+strings.ReplaceAll(threadCols, ",", ",t."), " ", "") + ` FROM threads t`
@@ -858,7 +859,7 @@ type ChatHit struct {
 
 // SearchChat finds chat messages whose text or sender contains every word
 // of the query, newest first.
-func (s *Store) SearchChat(accounts []string, query string, limit int) ([]ChatHit, error) {
+func (s *Store) SearchChat(accounts []string, query string, limit int, space string) ([]ChatHit, error) {
 	words := strings.Fields(strings.ToLower(query))
 	if len(words) == 0 {
 		return nil, nil
@@ -868,6 +869,10 @@ func (s *Store) SearchChat(accounts []string, query string, limit int) ([]ChatHi
 	for _, w := range words {
 		where = append(where, "(LOWER(c.text) LIKE ? OR LOWER(c.sender_name) LIKE ?)")
 		args = append(args, "%"+w+"%", "%"+w+"%")
+	}
+	if space != "" {
+		where = append(where, "c.space=?")
+		args = append(args, space)
 	}
 	if len(accounts) > 0 {
 		where = append(where, "c.account IN (?"+strings.Repeat(",?", len(accounts)-1)+")")

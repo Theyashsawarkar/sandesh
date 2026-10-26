@@ -102,9 +102,10 @@ func TestScreen(t *testing.T) {
 	if th, _ := m.curThread(); th.ID != "t-arjun" {
 		t.Fatalf("j j selected %s", th.ID)
 	}
-	// / opens the search window: local results as you type, Enter opens
+	// / opens the search window: it searches this section, in the background
 	m = press(m, "/", "l", "u", "n", "c", "h")
-	if m.mode != modeFind || len(m.find.mail) != 1 || !strings.Contains(m.View(), "MAIL · 1") {
+	m = runSearch(t, m)
+	if m.mode != modeFind || len(m.find.mail) != 1 || !strings.Contains(m.View(), "in ") {
 		t.Fatalf("search window: %+v", m.find)
 	}
 	m = press(m, "enter")
@@ -208,5 +209,59 @@ func TestComposer(t *testing.T) {
 	m = press(m, "esc")
 	if m.mode != modeNormal {
 		t.Fatal("second Esc should discard")
+	}
+}
+
+// runSearch runs the search window's background work, as the screen would.
+func runSearch(t *testing.T, m Model) Model {
+	t.Helper()
+	f := m.find
+	for _, msg := range []tea.Msg{findLocalTick{f.seq}, findServerTick{f.seq}} {
+		nm, cmd := m.Update(msg)
+		m = nm.(Model)
+		for cmd != nil {
+			res := cmd()
+			nm, cmd = m.Update(res)
+			m = nm.(Model)
+		}
+	}
+	return m
+}
+
+func TestSearchScopes(t *testing.T) {
+	m := model(t)
+	// Today: only today's mail; Tab widens to all mail
+	m = press(m, "l") // Today
+	m = press(m, "/")
+	m = typeText(m, "lunch")
+	m = runSearch(t, m)
+	if len(m.find.mail) != 0 || !strings.Contains(m.View(), "Today") {
+		t.Fatalf("today shouldn't hold the lunch thread: %+v", m.find.mail)
+	}
+	m = press(m, "tab")
+	m = runSearch(t, m)
+	if len(m.find.mail) != 1 || m.find.mail[0].t.ID != "t-rohan" {
+		t.Fatalf("all mail: %+v", m.find.mail)
+	}
+	m = press(m, "esc")
+	// a chat space: only its messages
+	m = press(m, "tab", "j") // chat, portal-dev
+	m = press(m, "/")
+	m = typeText(m, "smoke")
+	m = runSearch(t, m)
+	if len(m.find.chat) != 1 || len(m.find.mail) != 0 || m.find.chat[0].Space != "spaces/portal-dev" {
+		t.Fatalf("space search: %+v", m.find.chat)
+	}
+	m = typeText(m, "zzz")
+	m = runSearch(t, m)
+	if len(m.find.chat) != 0 {
+		t.Fatal("no match expected")
+	}
+	// enter opens the chat at the message
+	m = press(m, "backspace", "backspace", "backspace")
+	m = runSearch(t, m)
+	m = press(m, "enter")
+	if sp, ok := m.curSpace(); !ok || sp.Name != "spaces/portal-dev" || m.flashMsg == "" {
+		t.Fatalf("opened %+v %q", sp, m.flashMsg)
 	}
 }

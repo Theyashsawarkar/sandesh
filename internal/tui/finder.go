@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -19,19 +20,38 @@ import (
 	"github.com/Theyashsawarkar/sandesh/internal/store"
 )
 
-// The search window (/): a floating panel over the screen. What's in the
-// local copy shows as you type; when typing pauses, Gmail's own search
-// runs too and adds what isn't here yet. Mail and chat both, with a
-// preview of the highlighted result.
+// The search window (/): a floating panel that searches where you are.
+// In a mail section it searches that section (Tab: all mail); in chat, the
+// space you're on (Tab: every chat). Nothing runs on the screen's thread:
+// the local copy is searched after a short pause in typing, Gmail after a
+// longer one, previews are drawn in the background, and an answer to an
+// older query is dropped.
+
+type findScope int
+
+const (
+	scopeSection findScope = iota // this mail section
+	scopeAllMail
+	scopeSpace // this chat
+	scopeAllChat
+)
 
 type finder struct {
 	input      textinput.Model
+	scope      findScope
+	section    config.Section // the section you were in
+	space      store.Space    // the chat you were in
+	seq        int            // bumped on every change; stale answers are dropped
 	mail       []findMail
 	chat       []store.ChatHit
 	sel        int
+	searching  bool
 	serverBusy bool
-	serverQ    string // the query Gmail last answered
+	serverQ    string // the query (and scope) Gmail last answered
 	serverErr  string
+	cancel     context.CancelFunc // the Gmail search in flight
+	previews   map[string][]string
+	wantPrev   string
 }
 
 type findMail struct {
@@ -39,25 +59,67 @@ type findMail struct {
 	remote bool // found by Gmail's search, not in the local copy before
 }
 
-type findTickMsg struct{ q string }
-
-type findServerMsg struct {
-	q   string
-	ts  []store.Thread
-	err error
-}
+type (
+	findLocalTick  struct{ seq int }
+	findServerTick struct{ seq int }
+	findLocalMsg   struct {
+		seq  int
+		mail []findMail
+		chat []store.ChatHit
+	}
+	findServerMsg struct {
+		seq int
+		q   string
+		ts  []store.Thread
+		err error
+	}
+	findPreviewMsg struct {
+		key   string
+		lines []string
+	}
+)
 
 func (m *Model) openFinder() {
 	in := newInput(m.styles)
-	in.Placeholder = "search mail and chat · Gmail search works: from:priya has:attachment newer_than:7d"
 	in.Focus()
-	m.find = &finder{input: in}
+	f := &finder{input: in, previews: map[string][]string{}}
+	if m.tab == tabMail {
+		f.scope, f.section = scopeSection, m.currentSection()
+	} else if sp, ok := m.curSpace(); ok {
+		f.scope, f.space = scopeSpace, sp
+	} else {
+		f.scope = scopeAllChat
+	}
+	m.find = f
 	m.mode = modeFind
+	f.placeholder()
 }
+
+func (f *finder) placeholder() {
+	if f.mailScope() {
+		f.input.Placeholder = "search mail · Gmail search works: from:priya has:attachment newer_than:7d"
+	} else {
+		f.input.Placeholder = "search messages · a word, or a name"
+	}
+}
+
+func (f *finder) mailScope() bool { return f.scope == scopeSection || f.scope == scopeAllMail }
 
 func (f *finder) query() string { return strings.TrimSpace(f.input.Value()) }
 
 func (f *finder) count() int { return len(f.mail) + len(f.chat) }
+
+func (f *finder) scopeName() string {
+	switch f.scope {
+	case scopeSection:
+		return f.section.Name
+	case scopeAllMail:
+		return "all mail"
+	case scopeSpace:
+		return cli.SpaceTitle(f.space)
+	}
+	return "every chat"
+}
 
 // plain words of a query, without Gmail operators (from:, has:...)
 func plainWords(q string) string {
@@ -70,53 +132,133 @@ func plainWords(q string) string {
 	return strings.Join(w, " ")
 }
 
-// findLocal searches the local copy (instant).
-func (m *Model) findLocal() {
+func searchable(q string) bool {
+	return len([]rune(plainWords(q))) >= 2 || strings.Contains(q, ":")
+}
+
+// findChanged starts over for a new query or scope: the local copy after
+// 120 ms of quiet, Gmail after 600 ms.
+func (m *Model) findChanged() tea.Cmd {
 	f := m.find
-	q := f.query()
-	keep := map[string]bool{}
-	for _, x := range f.mail {
-		if x.remote && f.serverQ == q {
-			keep[x.t.Account+"/"+x.t.ID] = true
-		}
+	f.seq++
+	f.sel = 0
+	if f.cancel != nil {
+		f.cancel()
+		f.cancel = nil
 	}
-	var mail []findMail
-	if words := plainWords(q); words != "" {
-		ts, _ := m.a.Store.Threads(store.ThreadQuery{Accounts: m.accountFilter(), Text: words, Limit: 40})
-		for _, t := range ts {
-			mail = append(mail, findMail{t: t})
-		}
+	f.serverBusy, f.serverErr = false, ""
+	if !searchable(f.query()) {
+		f.mail, f.chat, f.searching = nil, nil, false
+		return nil
 	}
-	// Gmail's results for this same query stay
-	if f.serverQ == q {
-		seen := map[string]bool{}
-		for _, x := range mail {
-			seen[x.t.Account+"/"+x.t.ID] = true
-		}
-		for _, x := range f.mail {
-			if x.remote && !seen[x.t.Account+"/"+x.t.ID] {
-				mail = append(mail, x)
+	f.searching = true
+	seq := f.seq
+	cmds := []tea.Cmd{tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return findLocalTick{seq} })}
+	if f.mailScope() {
+		cmds = append(cmds, tea.Tick(600*time.Millisecond, func(time.Time) tea.Msg { return findServerTick{seq} }))
+	}
+	return tea.Batch(cmds...)
+}
+
+// findLocal searches the local copy, in the background.
+func (m *Model) findLocal(seq int) tea.Cmd {
+	f := m.find
+	if f == nil || seq != f.seq {
+		return nil
+	}
+	a, q, scope, sec, space := m.a, f.query(), f.scope, f.section, f.space
+	accs := m.accountFilter()
+	return func() tea.Msg {
+		words := plainWords(q)
+		var mail []findMail
+		var chat []store.ChatHit
+		switch scope {
+		case scopeSection, scopeAllMail:
+			if words == "" {
+				break // only Gmail operators: Gmail answers
 			}
+			tq := store.ThreadQuery{Accounts: accs, Text: words, Limit: 60}
+			if scope == scopeSection {
+				tq.Label = sec.Label
+				if sec.Query != "" {
+					tq.Section = sec.Name
+				}
+				if sec.Today {
+					y, mo, d := time.Now().Date()
+					tq.Since = time.Date(y, mo, d, 0, 0, 0, 0, time.Local).UnixMilli()
+				}
+			}
+			ts, _ := a.Store.Threads(tq)
+			for _, t := range ts {
+				if !t.Has("TRASH") && !t.Has("SPAM") || sec.Label == "TRASH" || sec.Label == "SPAM" {
+					mail = append(mail, findMail{t: t})
+				}
+			}
+		case scopeSpace:
+			chat, _ = a.Store.SearchChat(nil, words, 80, space.Name)
+		default:
+			chat, _ = a.Store.SearchChat(accs, words, 80, "")
 		}
-		sortMail(mail)
+		return findLocalMsg{seq, mail, chat}
 	}
-	f.mail = mail
-	f.chat = nil
-	if words := plainWords(q); words != "" {
-		f.chat, _ = m.a.Store.SearchChat(m.accountFilter(), words, 30)
+}
+
+func (m *Model) gotFindLocal(msg findLocalMsg) tea.Cmd {
+	f := m.find
+	if f == nil || msg.seq != f.seq {
+		return nil
 	}
+	f.searching = false
+	// Gmail's answers to this same query stay
+	seen := map[string]bool{}
+	for _, x := range msg.mail {
+		seen[x.t.Account+"/"+x.t.ID] = true
+	}
+	for _, x := range f.mail {
+		if x.remote && !seen[x.t.Account+"/"+x.t.ID] {
+			msg.mail = append(msg.mail, x)
+		}
+	}
+	sortMail(msg.mail)
+	f.mail, f.chat = msg.mail, msg.chat
 	f.sel = min(f.sel, max(0, f.count()-1))
+	return m.wantPreview()
 }
 
 func sortMail(x []findMail) {
 	sort.SliceStable(x, func(i, j int) bool { return x[i].t.LastDate > x[j].t.LastDate })
 }
 
-func (m *Model) findServer(q string) tea.Cmd {
+// gmailScope turns the section into a Gmail search and labels.
+func gmailScope(sec config.Section, q string) (string, []string) {
+	switch {
+	case sec.Today:
+		q += " after:" + time.Now().Format("2006/01/02")
+	case sec.Query != "":
+		q = "(" + sec.Query + ") " + q
+	}
+	if sec.Label != "" {
+		return q, []string{sec.Label}
+	}
+	return q, nil
+}
+
+func (m *Model) findServer(seq int) tea.Cmd {
 	f := m.find
-	if f == nil || f.query() != q || len([]rune(q)) < 2 || f.serverQ == q {
+	if f == nil || seq != f.seq || !f.mailScope() {
 		return nil
 	}
+	q := f.query()
+	key := fmt.Sprint(f.scope) + "\x00" + q
+	if f.serverQ == key {
+		return nil
+	}
+	gq, labels := q, []string(nil)
+	if f.scope == scopeSection {
+		gq, labels = gmailScope(f.section, q)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	f.cancel = cancel
 	f.serverBusy, f.serverErr = true, ""
 	a := m.a
 	accs := m.accountFilter()
@@ -124,28 +266,31 @@ func (m *Model) findServer(q string) tea.Cmd {
 		accs = m.accounts
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 		var all []store.Thread
 		for _, acc := range accs {
-			ts, err := a.SearchServer(ctx, acc, q, 25)
+			ts, err := a.SearchServer(ctx, acc, gq, 20, labels...)
 			if err != nil {
-				return findServerMsg{q, all, err}
+				return findServerMsg{seq, key, all, err}
 			}
 			all = append(all, ts...)
 		}
-		return findServerMsg{q, all, nil}
+		return findServerMsg{seq, key, all, nil}
 	}
 }
 
-func (m *Model) gotFindServer(msg findServerMsg) {
+func (m *Model) gotFindServer(msg findServerMsg) tea.Cmd {
 	f := m.find
-	if f == nil || f.query() != msg.q {
-		return
+	if f == nil || msg.seq != f.seq {
+		return nil
 	}
-	f.serverBusy, f.serverQ = false, msg.q
+	f.serverBusy, f.cancel = false, nil
 	if msg.err != nil {
-		f.serverErr = msg.err.Error()
+		if msg.err != context.Canceled {
+			f.serverErr = msg.err.Error()
+		}
+	} else {
+		f.serverQ = msg.q
 	}
 	seen := map[string]bool{}
 	for _, x := range f.mail {
@@ -158,57 +303,139 @@ func (m *Model) gotFindServer(msg findServerMsg) {
 		}
 	}
 	sortMail(f.mail)
+	return m.wantPreview()
+}
+
+// wantPreview draws the highlighted result's preview in the background
+// (once: they're kept while the window is open).
+func (m *Model) wantPreview() tea.Cmd {
+	f := m.find
+	if f == nil || f.count() == 0 {
+		return nil
+	}
+	w := m.findPrevWidth()
+	if f.sel < len(f.mail) {
+		t := f.mail[f.sel].t
+		key := "m/" + t.Account + "/" + t.ID
+		f.wantPrev = key
+		if _, ok := f.previews[key]; ok {
+			return nil
+		}
+		mm := *m // a copy, drawn away from the screen
+		mm.links, mm.expanded, mm.expandAll, mm.showQuoted = nil, map[string]bool{}, false, false
+		mm.labelNames = maps.Clone(m.labelNames) // its own: it caches into it
+		return func() tea.Msg {
+			mm.msgs, _ = mm.a.Store.Messages(t.Account, t.ID)
+			return findPreviewMsg{key, mm.mailLines(t, w)}
+		}
+	}
+	hit := f.chat[f.sel-len(f.mail)]
+	key := "c/" + hit.Name
+	f.wantPrev = key
+	if _, ok := f.previews[key]; ok {
+		return nil
+	}
+	mm := *m
+	words := strings.Fields(strings.ToLower(plainWords(f.query())))
+	return func() tea.Msg { return findPreviewMsg{key, mm.chatContext(hit, w, words)} }
+}
+
+// chatContext shows a found message with a few around it.
+func (m Model) chatContext(hit store.ChatHit, w int, words []string) []string {
+	s := m.styles
+	msgs, _ := m.a.Store.ChatMessages(hit.Account, hit.Space, 400)
+	at := -1
+	for i, c := range msgs {
+		if c.Name == hit.Name {
+			at = i
+		}
+	}
+	out := []string{s.bold.Render(hit.SpaceTitle), s.muted.Render(time.UnixMilli(hit.Created).Format("Mon 02 Jan 2006, 15:04")), ""}
+	if at < 0 {
+		return out
+	}
+	from, to := max(0, at-4), min(len(msgs), at+5)
+	for i := from; i < to; i++ {
+		c := msgs[i]
+		name := c.SenderName
+		if c.Mine {
+			name = "You"
+		}
+		bar := s.muted.Render("│")
+		textS := s.sub
+		if i == at {
+			bar, textS = s.accent.Bold(true).Render("┃"), s.text
+		}
+		out = append(out, bar+" "+s.bold.Render(name)+s.muted.Render(" "+time.UnixMilli(c.Created).Format("15:04")))
+		for _, l := range wrap(mime.Clean(c.Text), w-3) {
+			out = append(out, bar+" "+highlight(l, words, textS, s.accent.Bold(true)))
+		}
+	}
+	return append(out, "", s.muted.Render("enter opens the chat at this message"))
+}
+
+func (m *Model) gotFindPreview(msg findPreviewMsg) {
+	if f := m.find; f != nil {
+		f.previews[msg.key] = msg.lines
+	}
 }
 
 func (m Model) finderKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	f := m.find
 	switch k.String() {
 	case "esc", "ctrl+c":
+		if f.cancel != nil {
+			f.cancel()
+		}
 		m.find, m.mode = nil, modeNormal
 		return m, nil
 	case "up", "ctrl+p", "ctrl+k":
 		f.sel = max(0, f.sel-1)
-		return m, nil
+		return m, m.wantPreview()
 	case "down", "ctrl+n", "ctrl+j":
 		f.sel = min(max(0, f.count()-1), f.sel+1)
-		return m, nil
+		return m, m.wantPreview()
 	case "tab":
-		// jump between the mail and chat groups
-		if f.sel < len(f.mail) && len(f.chat) > 0 {
-			f.sel = len(f.mail)
-		} else if len(f.mail) > 0 {
-			f.sel = 0
+		// wider or narrower: this section ↔ all mail, this chat ↔ every chat
+		switch f.scope {
+		case scopeSection:
+			f.scope = scopeAllMail
+		case scopeAllMail:
+			f.scope = scopeSection
+		case scopeSpace:
+			f.scope = scopeAllChat
+		case scopeAllChat:
+			if f.space.Name != "" {
+				f.scope = scopeSpace
+			}
 		}
-		return m, nil
+		f.mail, f.chat = nil, nil
+		return m, m.findChanged()
 	case "ctrl+u":
 		f.input.SetValue("")
-		m.findLocal()
-		return m, nil
+		return m, m.findChanged()
 	case "enter":
 		return m.openFound()
 	}
 	var cmd tea.Cmd
 	before := f.query()
 	f.input, cmd = f.input.Update(k)
-	if q := f.query(); q != before {
-		f.sel = 0
-		m.findLocal()
-		return m, tea.Batch(cmd, tea.Tick(450*time.Millisecond, func(time.Time) tea.Msg { return findTickMsg{q} }))
+	if f.query() != before {
+		return m, tea.Batch(cmd, m.findChanged())
 	}
 	return m, cmd
 }
 
 // openFound shows the chosen result: a mail thread in a search section
-// holding every mail result, or the chat space of a message.
+// holding every mail result, or the chat at that message.
 func (m Model) openFound() (tea.Model, tea.Cmd) {
 	f := m.find
 	q := f.query()
 	if f.count() == 0 {
-		if q != "" {
-			m.find, m.mode = nil, modeNormal
-			return m, m.searchCmd(q) // nothing local yet: Gmail decides
-		}
 		return m, nil
+	}
+	if f.cancel != nil {
+		f.cancel()
 	}
 	m.find, m.mode = nil, modeNormal
 	if f.sel < len(f.mail) {
@@ -226,7 +453,7 @@ func (m Model) openFound() (tea.Model, tea.Cmd) {
 		m.filter = ""
 		m.reload()
 		m.selectKey(chosen.Account + "/" + chosen.ID)
-		m.say(fmt.Sprintf("%d found · W saves it as a section · h/l leaves", len(f.mail)))
+		m.say(fmt.Sprintf("%d found in %s · W saves it as a section · h/l leaves", len(f.mail), f.scopeName()))
 		return m, nil
 	}
 	hit := f.chat[f.sel-len(f.mail)]
@@ -234,7 +461,13 @@ func (m Model) openFound() (tea.Model, tea.Cmd) {
 	m.search, m.filter = nil, ""
 	m.sec = 0 // All
 	m.reload()
+	m.flashMsg = hit.Name
 	m.selectKey(hit.Account + "/" + hit.Space)
+	// scroll to the message (marked in the conversation)
+	if line, ok := m.chatMsgLine[hit.Name]; ok {
+		m.scroll = max(0, line-3)
+		m.fixView()
+	}
 	return m, nil
 }
 
@@ -252,34 +485,57 @@ func (m *Model) selectKey(key string) {
 
 // ------------------------------------------------------------------ view
 
+func (m Model) findPopupWidth() int { return min(m.w-4, 156) }
+
+func (m Model) findPrevWidth() int {
+	iw := m.findPopupWidth() - 4
+	return iw - max(40, iw*46/100) - 3
+}
+
 func (m Model) finderView() []string {
 	f := m.find
 	s := m.styles
-	w := min(m.w-6, 150)
-	h := min(m.h-4, 40)
+	w := m.findPopupWidth()
+	h := min(m.bodyHeight()-2, 44)
 	iw := w - 4
 	q := f.query()
 
-	status := s.muted.Render("local")
+	var status string
 	switch {
+	case f.searching:
+		status = s.accent.Render("⟳ searching…")
 	case f.serverBusy:
 		status = s.accent.Render("⟳ asking Gmail…")
 	case f.serverErr != "":
 		status = s.red.Render("Gmail: " + ansi.Truncate(f.serverErr, 30, "…"))
-	case f.serverQ != "" && f.serverQ == q:
-		status = s.green.Render("✓ local + Gmail")
+	case f.mailScope() && f.serverQ == fmt.Sprint(f.scope)+"\x00"+q && q != "":
+		status = s.green.Render(fmt.Sprintf("✓ %d · here + Gmail", f.count()))
+	case searchable(q):
+		status = s.muted.Render(fmt.Sprintf("%d found", f.count()))
 	}
 	in := f.input
 	in.Width = iw - lipgloss.Width(status) - 6
 	var lines []string
 	lines = append(lines, row(s.accent.Bold(true).Render(" ")+in.View(), status, iw))
-	lines = append(lines, s.muted.Render(strings.Repeat("─", iw)))
+	scopeLine := s.muted.Render(" in ") + s.round(s.pill, f.scopeName())
+	switch f.scope {
+	case scopeSection:
+		scopeLine += s.muted.Render("   tab: all mail")
+	case scopeAllMail:
+		scopeLine += s.muted.Render("   tab: only " + f.section.Name)
+	case scopeSpace:
+		scopeLine += s.muted.Render("   tab: every chat")
+	case scopeAllChat:
+		if f.space.Name != "" {
+			scopeLine += s.muted.Render("   tab: only " + cli.SpaceTitle(f.space))
+		}
+	}
+	lines = append(lines, scopeLine, s.muted.Render(strings.Repeat("─", iw)))
 
 	listW := max(40, iw*46/100)
 	prevW := iw - listW - 3
 	bodyH := h - 2 - len(lines) - 2
 	list := m.findList(listW, q)
-	// keep the highlighted result in view
 	top := 0
 	for i, l := range list {
 		if strings.Contains(l, "\x00sel") {
@@ -292,7 +548,13 @@ func (m Model) finderView() []string {
 	if top < len(list) {
 		list = list[top:]
 	}
-	prev := m.findPreview(prevW)
+	var prev []string
+	if f.count() > 0 {
+		prev = f.previews[f.wantPrev]
+		if prev == nil {
+			prev = []string{s.muted.Render("…")}
+		}
+	}
 	for i := 0; i < bodyH; i++ {
 		left, right := "", ""
 		if i < len(list) {
@@ -304,20 +566,8 @@ func (m Model) finderView() []string {
 		lines = append(lines, fit(left, listW)+s.muted.Render(" │ ")+fit(right, prevW))
 	}
 	lines = append(lines, s.muted.Render(strings.Repeat("─", iw)))
-	keys := s.muted.Render("↑↓ move · enter opens · tab mail/chat · ctrl+u clears · esc closes")
-	if q == "" {
-		keys = s.muted.Render("type to search · results from this machine at once, Gmail's after a moment")
-	}
-	lines = append(lines, " "+keys)
-
-	b := fg(s.c.Accent)
-	title := " search "
-	top2 := b.Render("╭─") + b.Bold(true).Render(title) + b.Render(strings.Repeat("─", max(0, w-3-lipgloss.Width(title)))+"╮")
-	out := []string{top2}
-	for _, l := range lines {
-		out = append(out, b.Render("│")+" "+fit(l, iw)+" "+b.Render("│"))
-	}
-	return append(out, b.Render("╰"+strings.Repeat("─", w-2)+"╯"))
+	lines = append(lines, s.muted.Render(" ↑↓ move · enter opens · tab looks wider or narrower · esc closes"))
+	return m.popupFrame("search", lines, w)
 }
 
 // findList renders the results; the highlighted one's first line carries
@@ -329,27 +579,29 @@ func (m Model) findList(w int, q string) []string {
 	hl := func(text string, base lipgloss.Style) string {
 		return highlight(text, words, base, s.accent.Bold(true))
 	}
-	var out []string
-	if q == "" {
-		return []string{"", s.muted.Render(" Try a name, a subject word, or Gmail search:"), "",
-			s.text.Render("   from:priya") + s.muted.Render("        mail from Priya"),
-			s.text.Render("   has:attachment") + s.muted.Render("    with files"),
-			s.text.Render("   newer_than:7d") + s.muted.Render("     this week"),
-			s.text.Render("   subject:invoice") + s.muted.Render("   in the subject"),
-			s.text.Render("   in:sent") + s.muted.Render("           what you sent")}
+	if !searchable(q) {
+		if f.mailScope() {
+			return []string{"", s.muted.Render(" A name, a subject word, or Gmail search:"), "",
+				s.text.Render("   from:priya") + s.muted.Render("        mail from Priya"),
+				s.text.Render("   has:attachment") + s.muted.Render("    with files"),
+				s.text.Render("   newer_than:7d") + s.muted.Render("     this week"),
+				s.text.Render("   subject:invoice") + s.muted.Render("   in the subject")}
+		}
+		return []string{"", s.muted.Render(" A word from a message, or someone's name")}
 	}
 	if f.count() == 0 {
-		msg := "Nothing here matches yet"
-		if f.serverBusy {
-			msg += "; Gmail is looking…"
-		} else if f.serverQ == q {
-			msg = "Nothing matches, here or on Gmail."
+		msg := "Nothing matches"
+		switch {
+		case f.searching:
+			msg = "Looking…"
+		case f.serverBusy:
+			msg = "Nothing here yet; Gmail is looking…"
+		case f.scope == scopeSection || f.scope == scopeSpace:
+			msg = "Nothing matches here. Tab looks wider."
 		}
 		return []string{"", s.muted.Render(" " + msg)}
 	}
-	if len(f.mail) > 0 {
-		out = append(out, s.muted.Bold(true).Render(fmt.Sprintf(" MAIL · %d", len(f.mail))))
-	}
+	var out []string
 	for i, x := range f.mail {
 		t := x.t
 		sel := i == f.sel
@@ -357,7 +609,6 @@ func (m Model) findList(w int, q string) []string {
 		if sel {
 			mark = s.accent.Bold(true).Render("▌ ")
 		}
-		who := t.Participants
 		whoS := s.sub
 		if t.Unread() {
 			whoS = s.bold
@@ -366,19 +617,13 @@ func (m Model) findList(w int, q string) []string {
 		if x.remote {
 			right = s.blue.Render("☁ ") + right
 		}
-		l1 := mark + m.avatar(who) + " " + hl(ansi.Truncate(who, w/2, "…"), whoS)
-		l2 := "     " + hl(t.Subject, s.text) + s.muted.Render(" — ") + hl(oneLine(t.Snippet), s.muted)
+		l1 := mark + m.avatar(t.Participants) + " " + hl(ansi.Truncate(t.Participants, w/2, "…"), whoS)
+		l2 := "  " + m.indent() + hl(t.Subject, s.text) + s.muted.Render(" — ") + hl(oneLine(t.Snippet), s.muted)
 		if sel {
 			l1 += "\x00sel"
 			l2 = s.accent.Bold(true).Render("▌") + l2[1:]
 		}
 		out = append(out, row(l1, right, w), ansi.Truncate(l2, w, "…"))
-	}
-	if len(f.chat) > 0 {
-		if len(out) > 0 {
-			out = append(out, "")
-		}
-		out = append(out, s.muted.Bold(true).Render(fmt.Sprintf(" CHAT · %d", len(f.chat))))
 	}
 	for i, c := range f.chat {
 		sel := len(f.mail)+i == f.sel
@@ -386,20 +631,19 @@ func (m Model) findList(w int, q string) []string {
 		if sel {
 			mark = s.accent.Bold(true).Render("▌ ")
 		}
-		where := c.SpaceTitle
-		if where == "" {
-			where = "a chat"
-		}
-		pre := "# "
-		if c.SpaceType == "DIRECT_MESSAGE" {
-			pre = "@ "
-		}
 		name := c.SenderName
 		if c.Mine {
 			name = "You"
 		}
-		l1 := mark + m.avatar(name) + " " + hl(name, s.sub) + s.muted.Render(" in "+pre) + s.sub.Render(ansi.Truncate(where, w/3, "…"))
-		l2 := "     " + hl(oneLine(c.Text), s.text)
+		l1 := mark + m.avatar(name) + " " + hl(name, s.sub)
+		if f.scope == scopeAllChat {
+			where := c.SpaceTitle
+			if where == "" {
+				where = "a chat"
+			}
+			l1 += s.muted.Render(" in ") + s.sub.Render(ansi.Truncate(where, w/3, "…"))
+		}
+		l2 := "  " + m.indent() + hl(oneLine(c.Text), s.text)
 		if sel {
 			l1 += "\x00sel"
 			l2 = s.accent.Bold(true).Render("▌") + l2[1:]
@@ -407,29 +651,6 @@ func (m Model) findList(w int, q string) []string {
 		out = append(out, row(l1, s.muted.Render(cli.When(c.Created)), w), ansi.Truncate(l2, w, "…"))
 	}
 	return out
-}
-
-func (m Model) findPreview(w int) []string {
-	f := m.find
-	s := m.styles
-	if f.count() == 0 {
-		return nil
-	}
-	if f.sel < len(f.mail) {
-		t := f.mail[f.sel].t
-		mm := m // a copy: the preview of this thread, not the list's
-		mm.msgs, _ = m.a.Store.Messages(t.Account, t.ID)
-		mm.expanded, mm.links = map[string]bool{}, nil
-		return mm.mailLines(t, w)
-	}
-	c := f.chat[f.sel-len(f.mail)]
-	words := strings.Fields(strings.ToLower(plainWords(f.query())))
-	out := []string{s.bold.Render(c.SpaceTitle), s.muted.Render(time.UnixMilli(c.Created).Format("Mon 02 Jan 15:04")), ""}
-	out = append(out, m.avatar(c.SenderName)+" "+s.bold.Render(c.SenderName))
-	for _, l := range wrap(mime.Clean(c.Text), w-2) {
-		out = append(out, "  "+highlight(l, words, s.text, s.accent.Bold(true)))
-	}
-	return append(out, "", s.muted.Render("enter opens this chat"))
 }
 
 // highlight marks each word of the search in text.
@@ -473,23 +694,5 @@ func startsAny(s string, words []string) bool {
 	return false
 }
 
-// overlay draws box over base, centred near the top.
-func overlay(base string, box []string, width int) string {
-	lines := strings.Split(base, "\n")
-	bw := 0
-	for _, l := range box {
-		bw = max(bw, lipgloss.Width(l))
-	}
-	x := max(0, (width-bw)/2)
-	y := 2
-	for i, l := range box {
-		r := y + i
-		if r >= len(lines) {
-			break
-		}
-		left := ansi.Cut(lines[r], 0, x)
-		left += strings.Repeat(" ", max(0, x-lipgloss.Width(left)))
-		lines[r] = left + l + ansi.Cut(lines[r], x+lipgloss.Width(l), width)
-	}
-	return strings.Join(lines, "\n")
-}
+// overlay draws box over base, near the top.
+func overlay(base string, box []string, width int) string { return overlayAt(base, box, width, 1) }

@@ -112,6 +112,8 @@ type Model struct {
 	outboxRows   map[string]store.OutboxItem // Sent: rows still in the outbox
 	comp         *composer
 	find         *finder
+	flashMsg     string         // a chat message opened from search: marked
+	chatMsgLine  map[string]int // where each chat message starts in the preview
 	pick         *picker
 	pickMode     mode   // where the picker goes back to
 	helpQ        string // filtering the keys popup
@@ -690,10 +692,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pickerFilesMsg:
 		m.gotFiles(msg)
 		return m, nil
-	case findTickMsg:
-		return m, m.findServer(msg.q)
+	case findLocalTick:
+		return m, m.findLocal(msg.seq)
+	case findServerTick:
+		return m, m.findServer(msg.seq)
+	case findLocalMsg:
+		return m, m.gotFindLocal(msg)
 	case findServerMsg:
-		m.gotFindServer(msg)
+		return m, m.gotFindServer(msg)
+	case findPreviewMsg:
+		m.gotFindPreview(msg)
 		return m, nil
 	case dirTickMsg:
 		return m, m.dirLookup(msg.q)

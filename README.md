@@ -214,7 +214,7 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `Q` | Toggle the quoted text in the thread |
 | `o` | Open a link from the preview by its number |
 | `Ctrl+d` / `Ctrl+u` | Scroll the preview half a page down / up |
-| `/` or `s` | Open the search window: mail and chat here at once, then Gmail's own results |
+| `/` or `s` | Open the search window (searches where you are: this section, or this chat) |
 | `W` | Save the current search as a section |
 | `X` | Remove the current saved-search section |
 | `u` | Switch account (all, then each one) |
@@ -278,18 +278,20 @@ permission when you sign in, so an older sign-in needs `sandesh auth add
 the name you give them stays on this machine. An empty name goes back to
 the default.
 
-**Searching** (`/` or `s`): a floating window over the screen. Results
-from this machine show as you type (mail and chat, matches highlighted,
-with a preview of the highlighted one); when you pause, Gmail's own search
-runs and adds what isn't here yet (marked ☁). Gmail's search syntax works:
-`from:priya has:attachment newer_than:7d`. Enter opens a result; mail
-results stay listed as a search section (`W` saves it).
+**Searching** (`/` or `s`): a floating window that searches where you are.
+In a mail section it looks in that section (Today: today's mail, Sent: what
+you sent); in chat, the space you're on. `Tab` widens it to all mail or
+every chat. Results from this machine show a moment after you stop typing,
+matches highlighted, with a preview; then Gmail's own search adds what isn't
+here yet (☁). Gmail syntax works: `from:priya has:attachment
+newer_than:7d`. Nothing waits on it: you can keep typing, move or close the
+window while it looks. Enter opens a result (a chat at that message).
 
 | Key | Search |
 |---|---|
 | `Up` / `Down` | Move between the results (Ctrl+p / Ctrl+n too) |
 | `Enter` | Open the result (mail results stay listed as a search section) |
-| `Tab` | Jump between the mail and chat results |
+| `Tab` | Switch where it looks: this section or all mail, this chat or every chat |
 | `Ctrl+u` | Clear the search |
 | `Esc` | Close the search window |
 
