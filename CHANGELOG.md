@@ -4,6 +4,25 @@ Newest first.
 
 ## Unreleased
 
+- **Syncs ~10× cheaper**: a sync with nothing new went from 23 Google calls
+  (12.6 s) to 2 (1.1 s) on a real account. Lookups that fail (a DM's title, a
+  person's name) are remembered and retried every 6 hours instead of on
+  every sync; changed spaces are fetched four at a time; cached spaces are
+  read in one query. The background service has a soft 128 MB memory cap.
+- **Chat read state follows the browser**: a space read on the web or phone
+  turns read here too, without waiting for a new message. `M` on a space is
+  Chat's own "mark as unread" (it stays unread after a sync, and marks the
+  latest message from someone else, even when you wrote last).
+- **Forwarding keeps attachments**: they're listed as `Attach: original: …`
+  in the editor (delete to drop) and fetched from Gmail when sent.
+- File picker (`+`, `U`) starts in the folder you're in; the review screen
+  shows each file's name, size and folder, and says when one is missing.
+- Fixes: `W` no longer glues the name onto the search (an empty name keeps
+  the search); `mail archive` and friends say what they did; the outbox
+  names files; `sandesh mcp` exits quietly when its client closes it; the
+  setup screen's border no longer shifts on the title line.
+- `SANDESH_DEBUG_HTTP=1` logs every Google request with its time.
+
 - **Compose works without $EDITOR**: with no editor set, sandesh used `vi`,
   which many systems don't have, so `c`, `r` and friends failed at once. It
   now picks the first installed of nvim, vim, vi, helix, micro, nano, kak

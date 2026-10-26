@@ -150,24 +150,31 @@ func (m *Model) pickFiles(then string) tea.Cmd {
 		m.setErr("picking a file needs fzf (or write Attach: in the editor)")
 		return nil
 	}
+	// from the folder you're in (the popup opens in the pane's folder);
+	// from home when that's / or outside it
 	home, _ := os.UserHomeDir()
+	dir, err := os.Getwd()
+	if err != nil || dir == "/" || !strings.HasPrefix(dir, home) && !strings.HasPrefix(dir, os.TempDir()) {
+		dir = home
+	}
 	list := `find . -type f -not -path '*/.*' -not -path '*/node_modules/*' 2>/dev/null | sed 's|^\./||'`
 	if _, err := exec.LookPath("fd"); err == nil {
 		list = "fd --type f --exclude node_modules --exclude .git ."
 	}
 	var out bytes.Buffer
-	cmd := exec.Command("sh", "-c", list+` | fzf --multi --scheme=path --prompt 'file> ' --height 60% --reverse `+
+	cmd := exec.Command("sh", "-c", list+` | fzf --multi --scheme=path --prompt "$PROMPT" --height 60% --reverse `+
 		`--header 'Enter picks · Tab picks several · Esc cancels' "$@"`, "sh")
+	cmd.Env = append(os.Environ(), "PROMPT="+tilde(dir)+"/ ")
 	if c := os.Getenv("VARNA_FZF_COLORS"); c != "" {
 		cmd.Args = append(cmd.Args, "--color", c)
 	}
-	cmd.Dir = home
+	cmd.Dir = dir
 	cmd.Stdout = &out
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		var paths []string
 		for _, l := range strings.Split(strings.TrimSpace(out.String()), "\n") {
 			if l = strings.TrimSpace(l); l != "" {
-				paths = append(paths, filepath.Join(home, l))
+				paths = append(paths, filepath.Join(dir, l))
 			}
 		}
 		if err != nil || len(paths) == 0 {

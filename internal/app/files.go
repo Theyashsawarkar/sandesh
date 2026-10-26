@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Theyashsawarkar/sandesh/internal/mime"
 	"github.com/Theyashsawarkar/sandesh/internal/store"
@@ -138,12 +140,23 @@ func (a *App) ResolveFiles(files []store.File) ([]store.File, error) {
 	var paths []string
 	var total int64
 	for _, f := range files {
-		if f.Path != "" {
+		switch {
+		case f.Path != "":
 			keep = append(keep, f)
 			total += f.Size
-		} else {
+		case f.Ref != "":
+			got, err := a.fetchRef(f)
+			if err != nil {
+				return nil, err
+			}
+			keep = append(keep, got)
+			total += got.Size
+		default:
 			paths = append(paths, f.Source)
 		}
+	}
+	if total > MaxAttach {
+		return nil, fmt.Errorf("attachments are over %d MB: share big files from Drive", MaxAttach>>20)
 	}
 	if len(paths) == 0 {
 		return keep, nil
@@ -206,6 +219,41 @@ func (a *App) copyFiles(paths []string, total int64) ([]store.File, error) {
 		out = append(out, store.File{Name: name, Type: ct, Size: st.Size(), Path: dst, Source: typed})
 	}
 	return out, nil
+}
+
+// fetchRef downloads a Gmail attachment (a forward's) into a private copy.
+func (a *App) fetchRef(f store.File) (store.File, error) {
+	parts := strings.SplitN(f.Ref, "/", 3)
+	if len(parts) != 3 {
+		return f, fmt.Errorf("bad attachment reference %q", f.Ref)
+	}
+	n, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return f, fmt.Errorf("bad attachment reference %q", f.Ref)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	dir := filepath.Join(a.Paths.State, "outbox", hex.EncodeToString(b))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return f, err
+	}
+	p, err := a.SaveMailAttachment(ctx, parts[0], parts[1], n, dir)
+	if err != nil {
+		os.RemoveAll(dir)
+		return f, fmt.Errorf("attachment %s: %w", f.Name, err)
+	}
+	_ = os.Chmod(p, 0o600)
+	st, err := os.Stat(p)
+	if err != nil {
+		return f, err
+	}
+	f.Path, f.Size = p, st.Size()
+	if f.Type == "" {
+		f.Type = "application/octet-stream"
+	}
+	return f, nil
 }
 
 // dropFiles removes the private copies once a send is over.

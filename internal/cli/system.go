@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -124,6 +125,11 @@ func daemon(a *app.App, args []string) error {
 	ctx, cancel := ctxSignal()
 	defer cancel()
 	log.SetFlags(0)
+	// a soft cap: the GC works harder instead of growing (a first sync
+	// of hundreds of HTML mails once peaked near 400 MB)
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(128 << 20)
+	}
 	release, ok := a.HoldDaemonLock()
 	if !ok {
 		return errors.New("another sandesh daemon is already running")
@@ -222,7 +228,11 @@ func mcpCmd(a *app.App, args []string) error {
 	}
 	ctx, cancel := ctxSignal()
 	defer cancel()
-	return mcpserver.Run(ctx, a, MCPHelpers())
+	err := mcpserver.Run(ctx, a, MCPHelpers())
+	if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+		return nil // the client closed us: a normal end
+	}
+	return err
 }
 
 // MCPHelpers hands the CLI's lookups and formatting to the MCP server.

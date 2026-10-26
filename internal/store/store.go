@@ -85,7 +85,7 @@ func Open(path string) (*Store, error) {
 }
 
 // schemaVersion: bump it with a step in migrate.
-const schemaVersion = 6
+const schemaVersion = 7
 
 func migrate(db *sql.DB) error {
 	var v int
@@ -138,6 +138,13 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 		if _, err := db.Exec(`UPDATE spaces SET synced_to=0 WHERE name IN (SELECT DISTINCT space FROM chat_messages WHERE text LIKE '%📎%')`); err != nil {
+			return err
+		}
+	}
+	if v < 7 {
+		// v7: lookups that failed (a person's name, a DM's title), so they
+		// aren't retried on every sync
+		if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tries (account TEXT NOT NULL, key TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (account, key))`); err != nil {
 			return err
 		}
 	}
@@ -718,6 +725,29 @@ func (s *Store) SetSpaceRead(account, space string, when int64) error {
 }
 
 // ForceSpaceRead sets the read time even backwards (marking unread).
+// Tried notes a lookup that failed just now.
+func (s *Store) Tried(account, key string) error {
+	_, err := s.db.Exec(`INSERT INTO tries(account,key,at) VALUES(?,?,?) ON CONFLICT(account,key) DO UPDATE SET at=excluded.at`, account, key, now())
+	return err
+}
+
+// TryAgain: the lookup never failed, or failed longer than `after` ago.
+func (s *Store) TryAgain(account, key string, after time.Duration) bool {
+	var at int64
+	if err := s.db.QueryRow(`SELECT at FROM tries WHERE account=? AND key=?`, account, key).Scan(&at); err != nil {
+		return true
+	}
+	return time.Since(time.UnixMilli(at)) > after
+}
+
+// LastOtherMessage is when someone else last wrote in the space (0: never).
+func (s *Store) LastOtherMessage(account, space string) int64 {
+	var t sql.NullInt64
+	_ = s.db.QueryRow(`SELECT MAX(c.created) FROM chat_messages c JOIN accounts a ON a.name=c.account
+	  WHERE c.account=? AND c.space=? AND c.sender<>a.chat_user`, account, space).Scan(&t)
+	return t.Int64
+}
+
 func (s *Store) ForceSpaceRead(account, space string, when int64) error {
 	_, err := s.db.Exec(`UPDATE spaces SET last_read=? WHERE account=? AND name=?`, when, account, space)
 	return err

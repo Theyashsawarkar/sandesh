@@ -48,6 +48,9 @@ type File struct {
 	Path string `json:"path"` // the private copy; "" until it is made
 	// Source is where it came from, as typed (shown in the editor)
 	Source string `json:"source,omitempty"`
+	// Ref is a Gmail attachment to fetch instead of a local file
+	// ("account/messageID/index"): a forwarded mail's attachments
+	Ref string `json:"ref,omitempty"`
 }
 
 type OutboxItem struct {

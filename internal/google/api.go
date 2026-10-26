@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -166,7 +167,11 @@ func (c *Client) raw(ctx context.Context, method, u, ctype string, payload []byt
 		if ctype != "" {
 			req.Header.Set("Content-Type", ctype)
 		}
+		t0 := time.Now()
 		resp, err := c.HTTP.Do(req)
+		if debugHTTP {
+			fmt.Fprintf(os.Stderr, "sandesh http: %s %s %v\n", method, strings.SplitN(u, "?", 2)[0], time.Since(t0).Round(time.Millisecond))
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -203,6 +208,10 @@ func (c *Client) raw(ctx context.Context, method, u, ctype string, payload []byt
 		return data, nil
 	}
 }
+
+// SANDESH_DEBUG_HTTP=1 logs every request (method, URL without the query,
+// time) to stderr: for counting what a sync costs.
+var debugHTTP = os.Getenv("SANDESH_DEBUG_HTTP") != ""
 
 // root is the API host the client talks to ("https://gmail.googleapis.com"
 // or the fake's address), for the upload endpoints.

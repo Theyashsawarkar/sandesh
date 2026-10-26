@@ -489,6 +489,8 @@ func mailModify(a *app.App, action string, args []string) error {
 		if err != nil {
 			return fmt.Errorf("%s %s: %w", action, id, err)
 		}
+		fmt.Printf("%s: %s\n", map[string]string{"archive": "archived", "unarchive": "back in the inbox", "trash": "moved to trash",
+			"untrash": "restored", "mark-read": "marked read", "unread": "marked unread", "star": "starred", "unstar": "unstarred"}[action], id)
 	}
 	return nil
 }
@@ -672,7 +674,13 @@ func Forward(t store.Thread, msgs []store.Message) store.Outgoing {
 	last := msgs[len(msgs)-1]
 	body := fmt.Sprintf("---------- Forwarded message ---------\nFrom: %s\nDate: %s\nSubject: %s\nTo: %s\n\n%s",
 		fromLine(last), time.UnixMilli(last.Date).Format("Mon 02 Jan 2006 15:04"), last.Subject, last.To, last.Body)
-	return store.Outgoing{Subject: mime.ForwardSubject(t.Subject), Body: body}
+	out := store.Outgoing{Subject: mime.ForwardSubject(t.Subject), Body: body}
+	// the original's attachments go along (delete them from Attach: to drop)
+	for i, at := range last.Attachments {
+		out.Files = append(out.Files, store.File{Name: at.Name, Size: int64(at.Size), Type: at.Type,
+			Source: "original: " + at.Name, Ref: fmt.Sprintf("%s/%s/%d", last.Account, last.ID, i)})
+	}
+	return out
 }
 
 // ------------------------------------------------------------------- chat
@@ -1070,6 +1078,9 @@ func outbox(a *app.App, args []string) error {
 		to := strings.Join(it.Out.To, ", ")
 		if it.Kind == "chat" {
 			what, to = oneLine(it.Out.Body, 40), it.Out.SpaceName
+		}
+		for _, f := range it.Out.Files {
+			what = strings.TrimSpace(what + " 📎 " + f.Name)
 		}
 		fmt.Printf("#%-4d %-9s %-5s %-6s %-28.28s %s\n", it.ID, it.Status, it.Kind, it.Origin, to, what)
 		if it.Error != "" {

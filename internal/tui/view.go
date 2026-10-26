@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -333,12 +335,23 @@ func (m Model) outgoingView(kind string, out store.Outgoing, note string, w int)
 		field("Subject", out.Subject)
 	}
 	for _, f := range out.Files {
-		size := ""
-		if f.Size > 0 {
-			size = "  " + app.HumanSize(f.Size)
+		name, size := f.Name, f.Size
+		if name == "" { // not copied yet: what's on disk
+			name = filepath.Base(f.Source)
+			if st, err := os.Stat(app.ExpandPath(f.Source)); err == nil {
+				size = st.Size()
+			} else {
+				name += " (not found)"
+			}
 		}
-		lines = append(lines, s.muted.Render(fmt.Sprintf("%-8s", "File"))+s.peach.Render("📎 "+firstNonEmpty(f.Name, f.Source))+
-			s.muted.Render(size+"  "+firstNonEmpty(f.Source, "")))
+		info := ""
+		if size > 0 {
+			info = "  " + app.HumanSize(size)
+		}
+		if dir := filepath.Dir(f.Source); dir != "." {
+			info += "  in " + tilde(dir)
+		}
+		lines = append(lines, ansi.Truncate(s.muted.Render(fmt.Sprintf("%-8s", "File"))+s.peach.Render("📎 "+name)+s.muted.Render(info), w, "…"))
 	}
 	lines = append(lines, s.muted.Render(strings.Repeat("─", min(w, 60))))
 	for _, l := range wrap(out.Body, w) {
@@ -362,7 +375,7 @@ func firstNonEmpty(xs ...string) string {
 
 func (m Model) inputView() string {
 	s := m.styles
-	prompt := map[mode]string{modeFilter: "/", modeAsk: "@claude ", modeSearch: "search gmail: ", modeSaveName: "section name: ",
+	prompt := map[mode]string{modeFilter: "/", modeAsk: "@claude ", modeSearch: "search gmail: ", modeSaveName: "section name (Enter: the search itself): ",
 		modeDraftHint: "draft a reply that says (Enter for Claude's pick): ", modeLink: fmt.Sprintf("open link (1-%d): ", len(m.links))}[m.mode]
 	return " " + s.accent2.Bold(true).Render(prompt) + s.text.Render(string(m.input)) + s.accent.Render("▏")
 }
@@ -374,7 +387,10 @@ func (m Model) footerView() string {
 	var keys [][2]string
 	switch m.mode {
 	case modeReview:
-		keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"d", "save draft"}, {"n", "discard"}}
+		keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"+", "file"}, {"-", "drop file"}, {"d", "save draft"}, {"n", "discard"}}
+		if m.review != nil && m.review.kind == "chat" {
+			keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"+", "file"}, {"-", "drop file"}, {"n", "discard"}}
+		}
 	case modeApprove:
 		keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"n", "decline"}, {"q", "later"}}
 	case modeFilter, modeAsk, modeSearch, modeSaveName, modeDraftHint, modeLink:

@@ -86,6 +86,29 @@ func (a *App) MarkSpaceRead(ctx context.Context, account, space string) error {
 	return err
 }
 
+// MarkSpaceUnread marks the latest message from someone else unread, here
+// and in Chat (moving the read time back is Chat's own "mark as unread").
+func (a *App) MarkSpaceUnread(ctx context.Context, account, space string) error {
+	last := a.Store.LastOtherMessage(account, space)
+	if last == 0 {
+		return errors.New("no one else has written here yet")
+	}
+	t := time.UnixMilli(last - 1)
+	if err := a.Store.ForceSpaceRead(account, space, t.UnixMilli()); err != nil {
+		return err
+	}
+	c, err := a.Client(account)
+	if err != nil {
+		return err
+	}
+	err = c.SetReadTime(ctx, space, t)
+	if google.IsChatAppMissing(err) {
+		a.ChatAppMissing.Store(true)
+		return nil
+	}
+	return err
+}
+
 // ---------------------------------------------------------------- sections
 
 // Sections are the configured ones plus searches saved from the screen

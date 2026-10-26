@@ -357,16 +357,29 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 	}
 	firstRun := acc.ChatSynced == 0
 	cutoff := time.Now().AddDate(0, 0, -a.Config.InitialDays)
-	var news []News
-	for _, gs := range spaces {
+	var (
+		news    []News
+		newsMu  sync.Mutex
+		firstEr error
+	)
+	// what we had, in one query (not one per space)
+	cachedSpaces := map[string]store.Space{}
+	if all, err := a.Store.Spaces([]string{acc.Name}, nil); err == nil {
+		for _, sp := range all {
+			cachedSpaces[sp.Name] = sp
+		}
+	}
+	syncSpace := func(gs google.ChatSpace) error {
 		if gs.SingleUserBotDM {
-			continue
+			return nil
 		}
 		active := google.ParseTime(gs.LastActiveTime)
-		cached, cerr := a.Store.Space(acc.Name, gs.Name)
-		known := cerr == nil
+		cached, known := cachedSpaces[gs.Name]
 		sp := store.Space{Account: acc.Name, Name: gs.Name, DisplayName: mime.Clean(gs.DisplayName), Type: gs.SpaceType, LastActive: active.UnixMilli()}
-		if sp.DisplayName == "" && (!known || cached.DisplayName == "" || strings.Contains(cached.DisplayName, "user ")) {
+		// a DM or group without a title: work one out, but a failed try
+		// waits 6 hours (each costs Google calls on every sync otherwise)
+		if sp.DisplayName == "" && (!known || cached.DisplayName == "" || strings.Contains(cached.DisplayName, "user ")) &&
+			a.Store.TryAgain(acc.Name, "title:"+gs.Name, 6*time.Hour) {
 			name := a.dmName(ctx, c, acc.Name, gs.Name, me)
 			if name == "" && gs.SpaceType == "DIRECT_MESSAGE" && me != "" {
 				// an old DM: its latest messages name the other person
@@ -382,16 +395,24 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 			if name != "" {
 				sp.DisplayName = name
 				_ = a.Store.RenameSpace(acc.Name, gs.Name, name)
+			} else {
+				_ = a.Store.Tried(acc.Name, "title:"+gs.Name)
 			}
 		}
 		if err := a.Store.PutSpace(sp); err != nil {
-			return nil, err
+			return err
 		}
 		if known && cached.SyncedTo >= active.UnixMilli() {
-			continue // nothing new
+			// nothing new; but read elsewhere (the browser, the phone)?
+			if cached.LastRead < cached.LastActive {
+				if rt, err := c.ReadTime(ctx, gs.Name); err == nil && rt.UnixMilli() > cached.LastRead {
+					_ = a.Store.ForceSpaceRead(acc.Name, gs.Name, rt.UnixMilli())
+				}
+			}
+			return nil
 		}
 		if !known && active.Before(cutoff) {
-			continue // old and never opened: skip until it moves
+			return nil // old and never opened: skip until it moves
 		}
 		var after time.Time
 		if known && cached.SyncedTo > 0 {
@@ -399,7 +420,7 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 		}
 		msgs, err := c.Messages(ctx, gs.Name, after, 50)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", gs.Name, err)
+			return fmt.Errorf("%s: %w", gs.Name, err)
 		}
 		var out []store.ChatMessage
 		var newest int64
@@ -436,11 +457,13 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 				if gs.SpaceType != "DIRECT_MESSAGE" {
 					title = name + " in " + sp.DisplayName
 				}
+				newsMu.Lock()
 				news = append(news, News{Account: acc.Name, Title: title, Body: m.Text, Key: gs.Name, Chat: true})
+				newsMu.Unlock()
 			}
 		}
 		if err := a.Store.PutChatMessages(out); err != nil {
-			return nil, err
+			return err
 		}
 		if newest == 0 {
 			newest = active.UnixMilli()
@@ -451,6 +474,34 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 		} else if !known {
 			_ = a.Store.ForceSpaceRead(acc.Name, gs.Name, newest)
 		}
+		return nil
+	}
+	// a few spaces at a time: each call takes ~0.5 s, one after another
+	// made a sync of a busy account take many seconds
+	work := make(chan google.ChatSpace)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for gs := range work {
+				if err := syncSpace(gs); err != nil {
+					newsMu.Lock()
+					if firstEr == nil {
+						firstEr = err
+					}
+					newsMu.Unlock()
+				}
+			}
+		}()
+	}
+	for _, gs := range spaces {
+		work <- gs
+	}
+	close(work)
+	wg.Wait()
+	if firstEr != nil {
+		return news, firstEr
 	}
 	return news, a.Store.SetChatSynced(acc.Name, me)
 }
@@ -498,21 +549,13 @@ func (a *App) userName(ctx context.Context, c *google.Client, account, user stri
 		return name
 	}
 	fallback := "user " + tail(strings.TrimPrefix(user, "users/"), 4)
-	// a failed lookup is retried at most every 30 minutes, and never stored
-	a.mu.Lock()
-	if a.missed == nil {
-		a.missed = map[string]time.Time{}
-	}
-	at, failed := a.missed[account+"/"+user]
-	a.mu.Unlock()
-	if failed && time.Since(at) < 30*time.Minute {
+	// a failed lookup is retried every 6 hours, and never stored as a name
+	if !a.Store.TryAgain(account, "person:"+user, 6*time.Hour) {
 		return fallback
 	}
 	_, name, email, err := c.Person(ctx, user)
 	if err != nil || name == "" && email == "" {
-		a.mu.Lock()
-		a.missed[account+"/"+user] = time.Now()
-		a.mu.Unlock()
+		_ = a.Store.Tried(account, "person:"+user)
 		return fallback
 	}
 	if name == "" {

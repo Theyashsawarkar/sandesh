@@ -511,7 +511,7 @@ func (s setup) View() string {
 	w := min(s.w-4, 86)
 	inner := w - 6
 	var b []string
-	b = append(b, st.accent.Bold(true).Render("sandesh")+st.muted.Render(" · संदेश"), "")
+	b = append(b, st.accent.Bold(true).Render("sandesh")+st.muted.Render(" · mail and chat in the terminal"), "")
 	cur := int(s.step)
 	if s.step == stepSigning {
 		cur = 1

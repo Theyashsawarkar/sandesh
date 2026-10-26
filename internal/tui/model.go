@@ -631,6 +631,9 @@ func (m Model) inputKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.searchCmd(text)
 			}
 		case modeSaveName:
+			if m.search != nil && text == "" {
+				text = m.search.Query
+			}
 			if m.search != nil && text != "" {
 				if err := m.a.SaveSearch(text, m.search.Query); err != nil {
 					m.err = err.Error()
@@ -791,7 +794,7 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		}
 	case "W":
 		if m.search != nil {
-			m.mode, m.input = modeSaveName, []rune(m.search.Query)
+			m.mode, m.input = modeSaveName, nil // Enter alone names it after the search
 		} else {
 			m.say("search first (s), then W saves it")
 		}
@@ -847,9 +850,7 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 				if read {
 					return m, m.act("marked read", func(ctx context.Context) error { return m.a.MarkSpaceRead(ctx, sp.Account, sp.Name) })
 				}
-				_ = m.a.Store.ForceSpaceRead(sp.Account, sp.Name, sp.LastActive-1)
-				m.reload()
-				m.say("marked unread here (Google Chat itself has no unread)")
+				return m, m.act("marked unread", func(ctx context.Context) error { return m.a.MarkSpaceUnread(ctx, sp.Account, sp.Name) })
 			}
 			return m, nil
 		}

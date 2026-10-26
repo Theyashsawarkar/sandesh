@@ -331,3 +331,37 @@ func TestAttachments(t *testing.T) {
 		t.Fatal("a folder attached")
 	}
 }
+
+func TestChatUnreadSurvivesSync(t *testing.T) {
+	a, _ := setup(t)
+	ctx := context.Background()
+	if _, errs := a.SyncAll(ctx); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	unread := func() int {
+		sps, _ := a.Store.Spaces(nil, nil)
+		for _, s := range sps {
+			if s.Name == "spaces/portal-dev" {
+				return s.Unread
+			}
+		}
+		return -1
+	}
+	if err := a.MarkSpaceRead(ctx, "work", "spaces/portal-dev"); err != nil || unread() != 0 {
+		t.Fatalf("read: %v %d", err, unread())
+	}
+	// your own message last: unread still marks the others' latest
+	if _, err := a.Queue("work", "chat", store.Outgoing{Space: "spaces/portal-dev", Body: "mine"}, OriginYou); err != nil {
+		t.Fatal(err)
+	}
+	a.DeliverDue(ctx)
+	if err := a.MarkSpaceUnread(ctx, "work", "spaces/portal-dev"); err != nil || unread() != 1 {
+		t.Fatalf("unread: %v %d", err, unread())
+	}
+	if _, errs := a.SyncAll(ctx); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	if unread() != 1 {
+		t.Fatalf("sync undid mark unread: %d", unread())
+	}
+}

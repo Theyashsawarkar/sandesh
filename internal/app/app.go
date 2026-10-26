@@ -29,7 +29,6 @@ type App struct {
 
 	mu      sync.Mutex
 	clients map[string]*google.Client
-	missed  map[string]time.Time // chat users whose name lookup failed
 
 	// ChatAppMissing is set once Chat said the Cloud project has no Chat
 	// app: reading works, read state and sending don't.
