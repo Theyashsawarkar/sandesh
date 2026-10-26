@@ -3,6 +3,7 @@ package google
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -126,30 +127,48 @@ func IsNotFound(err error) bool {
 }
 
 func (c *Client) do(ctx context.Context, method, u string, body, out any) error {
-	var rd io.Reader
+	var payload []byte
+	ctype := ""
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
-		rd = bytes.NewReader(b)
+		payload, ctype = b, "application/json"
 	}
-	if strings.HasPrefix(u, c.gmail) && c.quota != nil {
+	data, err := c.raw(ctx, method, u, ctype, payload)
+	if err != nil {
+		return err
+	}
+	if out != nil && len(data) > 0 {
+		return json.Unmarshal(data, out)
+	}
+	return nil
+}
+
+// raw sends payload (nil for none) and returns the response body, with
+// Gmail's quota pacing and retries on rate limits and server errors.
+func (c *Client) raw(ctx context.Context, method, u, ctype string, payload []byte) ([]byte, error) {
+	if strings.HasPrefix(u, c.gmail) && c.quota != nil || strings.Contains(u, "/upload/gmail/") && c.quota != nil {
 		if err := c.quota.take(ctx, gmailCost(method, u)); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for attempt := 0; ; attempt++ {
+		var rd io.Reader
+		if payload != nil {
+			rd = bytes.NewReader(payload)
+		}
 		req, err := http.NewRequestWithContext(ctx, method, u, rd)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if body != nil {
-			req.Header.Set("Content-Type", "application/json")
+		if ctype != "" {
+			req.Header.Set("Content-Type", ctype)
 		}
 		resp, err := c.HTTP.Do(req)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 		resp.Body.Close()
@@ -163,12 +182,8 @@ func (c *Client) do(ctx context.Context, method, u string, body, out any) error 
 			}
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil, ctx.Err()
 			case <-time.After(wait):
-			}
-			if body != nil {
-				b, _ := json.Marshal(body)
-				rd = bytes.NewReader(b)
 			}
 			continue
 		}
@@ -183,14 +198,15 @@ func (c *Client) do(ctx context.Context, method, u string, body, out any) error 
 			if msg == "" {
 				msg = strings.TrimSpace(string(data))
 			}
-			return &APIError{Status: resp.StatusCode, Message: msg}
+			return nil, &APIError{Status: resp.StatusCode, Message: msg}
 		}
-		if out != nil && len(data) > 0 {
-			return json.Unmarshal(data, out)
-		}
-		return nil
+		return data, nil
 	}
 }
+
+// root is the API host the client talks to ("https://gmail.googleapis.com"
+// or the fake's address), for the upload endpoints.
+func root(base, suffix string) string { return strings.TrimSuffix(base, suffix) }
 
 // ------------------------------------------------------------------ gmail
 
@@ -319,6 +335,9 @@ func (c *Client) UntrashThread(ctx context.Context, id string) error {
 // Send sends a raw message (from mime.Build), in a thread when threadID
 // is set. Returns the new message's id.
 func (c *Client) Send(ctx context.Context, raw, threadID string) (string, error) {
+	if len(raw) > 4<<20 {
+		return c.sendUpload(ctx, raw, threadID)
+	}
 	body := map[string]string{"raw": raw}
 	if threadID != "" {
 		body["threadId"] = threadID
@@ -328,6 +347,63 @@ func (c *Client) Send(ctx context.Context, raw, threadID string) (string, error)
 	}
 	err := c.do(ctx, "POST", c.gmail+"/users/me/messages/send", body, &r)
 	return r.ID, err
+}
+
+// sendUpload sends a message too big for a JSON body (Gmail takes up to
+// 35 MB this way): a multipart/related upload of the metadata and the
+// RFC 822 message.
+func (c *Client) sendUpload(ctx context.Context, raw, threadID string) (string, error) {
+	msg, err := base64.URLEncoding.DecodeString(raw)
+	if err != nil {
+		return "", err
+	}
+	meta, _ := json.Marshal(map[string]string{"threadId": threadID})
+	if threadID == "" {
+		meta = []byte("{}")
+	}
+	const boundary = "sandesh-upload-boundary"
+	var b bytes.Buffer
+	b.WriteString("--" + boundary + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n")
+	b.Write(meta)
+	b.WriteString("\r\n--" + boundary + "\r\nContent-Type: message/rfc822\r\n\r\n")
+	b.Write(msg)
+	b.WriteString("\r\n--" + boundary + "--\r\n")
+	u := root(c.gmail, "/gmail/v1") + "/upload/gmail/v1/users/me/messages/send?uploadType=multipart"
+	data, err := c.raw(ctx, "POST", u, "multipart/related; boundary="+boundary, b.Bytes())
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		ID string `json:"id"`
+	}
+	err = json.Unmarshal(data, &r)
+	return r.ID, err
+}
+
+// GetMessage fetches one message in full (to find an attachment's part).
+func (c *Client) GetMessage(ctx context.Context, id string) (GmailMessage, error) {
+	var m GmailMessage
+	err := c.do(ctx, "GET", c.gmail+"/users/me/messages/"+url.PathEscape(id)+"?format=full", nil, &m)
+	return m, err
+}
+
+// AttachmentData downloads one attachment of a message.
+func (c *Client) AttachmentData(ctx context.Context, msgID, attID string) ([]byte, error) {
+	var r struct {
+		Data string `json:"data"`
+	}
+	if err := c.do(ctx, "GET", c.gmail+"/users/me/messages/"+url.PathEscape(msgID)+"/attachments/"+url.PathEscape(attID), nil, &r); err != nil {
+		return nil, err
+	}
+	return decodeB64(r.Data)
+}
+
+func decodeB64(s string) ([]byte, error) {
+	s = strings.TrimRight(s, "=")
+	if b, err := base64.RawURLEncoding.DecodeString(s); err == nil {
+		return b, nil
+	}
+	return base64.RawStdEncoding.DecodeString(s)
 }
 
 // CreateDraft saves a Gmail draft (visible in Gmail everywhere).
@@ -415,11 +491,24 @@ type ChatMsg struct {
 	Thread struct {
 		Name string `json:"name"`
 	} `json:"thread"`
-	Attachment []struct {
-		ContentName string `json:"contentName"`
-		ContentType string `json:"contentType"`
-	} `json:"attachment"`
-	CardsV2 []json.RawMessage `json:"cardsV2"`
+	Attachment []ChatAttachment  `json:"attachment"`
+	CardsV2    []json.RawMessage `json:"cardsV2"`
+}
+
+// ChatAttachment is a file in a chat message: uploaded to Chat (a data
+// ref, downloadable here) or a Drive file (opened in the browser).
+type ChatAttachment struct {
+	Name              string `json:"name,omitempty"`
+	ContentName       string `json:"contentName"`
+	ContentType       string `json:"contentType"`
+	Source            string `json:"source,omitempty"`
+	AttachmentDataRef *struct {
+		ResourceName string `json:"resourceName"`
+	} `json:"attachmentDataRef,omitempty"`
+	DriveDataRef *struct {
+		DriveFileID string `json:"driveFileId"`
+	} `json:"driveDataRef,omitempty"`
+	DownloadURI string `json:"downloadUri,omitempty"`
 }
 
 // Display is the message's text, or what it holds when it has none.
@@ -461,8 +550,54 @@ func (c *Client) Messages(ctx context.Context, space string, after time.Time, ma
 }
 
 // PostMessage sends text to a space; thread (a thread name) replies in it.
-func (c *Client) PostMessage(ctx context.Context, space, text, thread string) (string, error) {
+// ChatMedia downloads a file uploaded to a chat message.
+func (c *Client) ChatMedia(ctx context.Context, resourceName string) ([]byte, error) {
+	u := root(c.chat, "/v1") + "/v1/media/" + escapePath(resourceName) + "?alt=media"
+	return c.raw(ctx, "GET", u, "", nil)
+}
+
+// UploadChatFile uploads a file to a space; the returned reference goes
+// into the message that carries it.
+func (c *Client) UploadChatFile(ctx context.Context, space, name, ctype string, data []byte) (json.RawMessage, error) {
+	const boundary = "sandesh-upload-boundary"
+	meta, _ := json.Marshal(map[string]string{"filename": name})
+	var b bytes.Buffer
+	b.WriteString("--" + boundary + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n")
+	b.Write(meta)
+	b.WriteString("\r\n--" + boundary + "\r\nContent-Type: " + ctype + "\r\n\r\n")
+	b.Write(data)
+	b.WriteString("\r\n--" + boundary + "--\r\n")
+	u := root(c.chat, "/v1") + "/upload/v1/" + space + "/attachments:upload?uploadType=multipart"
+	out, err := c.raw(ctx, "POST", u, "multipart/related; boundary="+boundary, b.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		AttachmentDataRef json.RawMessage `json:"attachmentDataRef"`
+	}
+	if err := json.Unmarshal(out, &r); err != nil {
+		return nil, err
+	}
+	return r.AttachmentDataRef, nil
+}
+
+func escapePath(p string) string {
+	parts := strings.Split(p, "/")
+	for i, x := range parts {
+		parts[i] = url.PathEscape(x)
+	}
+	return strings.Join(parts, "/")
+}
+
+func (c *Client) PostMessage(ctx context.Context, space, text, thread string, files ...json.RawMessage) (string, error) {
 	body := map[string]any{"text": text}
+	if len(files) > 0 {
+		var atts []map[string]any
+		for _, f := range files {
+			atts = append(atts, map[string]any{"attachmentDataRef": f})
+		}
+		body["attachment"] = atts
+	}
 	u := c.chat + "/" + space + "/messages"
 	if thread != "" {
 		body["thread"] = map[string]string{"name": thread}

@@ -458,6 +458,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = ""
 		}
 		return m, tea.Batch(cmds...)
+	case pickedFilesMsg:
+		return m.afterPick(msg)
 	case syncSoonMsg:
 		return m, m.syncCmd()
 	case syncedMsg:
@@ -840,6 +842,14 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		return m, m.replyCmd(s)
 	case "L":
 		return m, m.labelCmd()
+	case "v", "V":
+		return m, m.saveCmd(s == "V")
+	case "U":
+		if m.tab != tabChat {
+			m.say("U uploads into a chat space; for mail, reply and press + (or write Attach: in the editor)")
+			return m, nil
+		}
+		return m, m.pickFiles("chat")
 	case "A":
 		if len(m.waiting) > 0 {
 			m.mode = modeApprove

@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	stdmime "mime"
+	"mime/multipart"
 	"net/http"
 	stdmail "net/mail"
 	"sort"
@@ -26,12 +28,20 @@ type Message struct {
 	Subject      string
 	Body         string
 	HTML         string // when set, the message is multipart/alternative
+	Files        []File
 	Date         time.Time
 	HistoryID    int
 }
 
+// File is an attachment, in mail or chat.
+type File struct {
+	Name, Type string
+	Data       []byte
+}
+
 type ChatMessage struct {
 	Name, Space, Thread, Sender, Text string
+	Files                             []File
 	Created                           time.Time
 }
 
@@ -54,6 +64,7 @@ type Server struct {
 	People   map[string][2]string // users/N -> name, email
 	Sent     []string             // raw messages sent, decoded
 	Requests []string
+	uploads  map[string]File // chat media by resource name
 }
 
 func New() *Server {
@@ -131,12 +142,66 @@ func (s *Server) gmailMessage(m *Message) map[string]any {
 
 func payload(m *Message, headers []map[string]string) map[string]any {
 	plain := map[string]any{"mimeType": "text/plain", "body": map[string]any{"data": b64(m.Body), "size": len(m.Body)}}
+	var body map[string]any
 	if m.HTML == "" {
-		plain["headers"] = headers
-		return plain
+		body = plain
+	} else {
+		body = map[string]any{"mimeType": "multipart/alternative", "parts": []any{plain,
+			map[string]any{"mimeType": "text/html", "body": map[string]any{"data": b64(m.HTML), "size": len(m.HTML)}}}}
 	}
-	return map[string]any{"mimeType": "multipart/alternative", "headers": headers, "parts": []any{plain,
-		map[string]any{"mimeType": "text/html", "body": map[string]any{"data": b64(m.HTML), "size": len(m.HTML)}}}}
+	if len(m.Files) == 0 {
+		body["headers"] = headers
+		return body
+	}
+	parts := []any{body}
+	for i, f := range m.Files {
+		parts = append(parts, map[string]any{"mimeType": f.Type, "filename": f.Name,
+			"body": map[string]any{"attachmentId": fmt.Sprintf("att-%s-%d", m.ID, i), "size": len(f.Data)}})
+	}
+	return map[string]any{"mimeType": "multipart/mixed", "headers": headers, "parts": parts}
+}
+
+func (s *Server) message(id string) *Message {
+	for _, m := range s.Messages {
+		if m.ID == id {
+			return m
+		}
+	}
+	return nil
+}
+
+// parseSent reads a sent RFC 822 message: its text and its files.
+func parseSent(raw string) (*stdmail.Message, string, []File) {
+	msg, err := stdmail.ReadMessage(strings.NewReader(raw))
+	if err != nil {
+		return nil, "", nil
+	}
+	unb64 := func(b []byte) []byte {
+		d, _ := base64.StdEncoding.DecodeString(strings.ReplaceAll(strings.ReplaceAll(string(b), "\r\n", ""), "\n", ""))
+		return d
+	}
+	mt, params, _ := stdmime.ParseMediaType(msg.Header.Get("Content-Type"))
+	if !strings.HasPrefix(mt, "multipart/") {
+		b, _ := io.ReadAll(msg.Body)
+		return msg, strings.ReplaceAll(string(unb64(b)), "\r\n", "\n"), nil
+	}
+	var text string
+	var files []File
+	mr := multipart.NewReader(msg.Body, params["boundary"])
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			break
+		}
+		b, _ := io.ReadAll(part)
+		if name := part.FileName(); name != "" {
+			ct, _, _ := stdmime.ParseMediaType(part.Header.Get("Content-Type"))
+			files = append(files, File{Name: mime.DecodeHeader(name), Type: ct, Data: unb64(b)})
+		} else {
+			text = strings.ReplaceAll(string(unb64(b)), "\r\n", "\n")
+		}
+	}
+	return msg, text, files
 }
 
 func (s *Server) thread(id string) []*Message {
@@ -166,9 +231,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.Requests = append(s.Requests, r.Method+" "+r.URL.Path)
 	p := r.URL.Path
 	var body map[string]any
+	var rawBody []byte
 	if r.Body != nil {
-		b, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(b, &body)
+		rawBody, _ = io.ReadAll(r.Body)
+		_ = json.Unmarshal(rawBody, &body)
 	}
 	q := r.URL.Query()
 	switch {
@@ -252,20 +318,37 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		write(w, map[string]any{"history": hs, "historyId": strconv.Itoa(s.history)})
+	case strings.HasPrefix(p, "/gmail/v1/users/me/messages/") && p != "/gmail/v1/users/me/messages/send":
+		rest := strings.TrimPrefix(p, "/gmail/v1/users/me/messages/")
+		id, att, _ := strings.Cut(rest, "/attachments/")
+		m := s.message(id)
+		if m == nil {
+			fail(w, 404, "Requested entity was not found.")
+			return
+		}
+		if att == "" {
+			write(w, s.gmailMessage(m))
+			return
+		}
+		for i, f := range m.Files {
+			if att == fmt.Sprintf("att-%s-%d", m.ID, i) {
+				write(w, map[string]any{"data": base64.URLEncoding.EncodeToString(f.Data), "size": len(f.Data)})
+				return
+			}
+		}
+		fail(w, 404, "no such attachment")
 	case p == "/gmail/v1/users/me/messages/send":
 		raw, _ := body["raw"].(string)
 		dec, _ := base64.URLEncoding.DecodeString(raw)
 		s.Sent = append(s.Sent, string(dec))
-		msg, err := stdmail.ReadMessage(strings.NewReader(string(dec)))
-		if err != nil {
+		msg, text, files := parseSent(string(dec))
+		if msg == nil {
 			fail(w, 400, "bad message")
 			return
 		}
-		b, _ := io.ReadAll(msg.Body)
-		text, _ := base64.StdEncoding.DecodeString(strings.ReplaceAll(strings.ReplaceAll(string(b), "\r\n", ""), "\n", ""))
 		thread, _ := body["threadId"].(string)
 		m := &Message{ID: s.id(), ThreadID: thread, Labels: []string{"SENT"}, From: s.Email, To: msg.Header.Get("To"), Cc: msg.Header.Get("Cc"),
-			Subject: mime.DecodeHeader(msg.Header.Get("Subject")), Body: strings.ReplaceAll(string(text), "\r\n", "\n"), Date: time.Now()}
+			Subject: mime.DecodeHeader(msg.Header.Get("Subject")), Body: text, Files: files, Date: time.Now()}
 		if m.ThreadID == "" {
 			m.ThreadID = m.ID
 		}
@@ -319,6 +402,40 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			out = append(out, map[string]any{"member": map[string]string{"name": m, "type": "HUMAN"}})
 		}
 		write(w, map[string]any{"memberships": out})
+	case strings.HasPrefix(p, "/chat/v1/media/"):
+		f, ok := s.uploads[strings.TrimPrefix(p, "/chat/v1/media/")]
+		if !ok {
+			fail(w, 404, "no such media")
+			return
+		}
+		w.Header().Set("Content-Type", f.Type)
+		_, _ = w.Write(f.Data)
+	case strings.HasPrefix(p, "/chat/upload/v1/spaces/") && strings.HasSuffix(p, "/attachments:upload"):
+		_, params, _ := stdmime.ParseMediaType(r.Header.Get("Content-Type"))
+		mr := multipart.NewReader(strings.NewReader(string(rawBody)), params["boundary"])
+		var meta struct {
+			Filename string `json:"filename"`
+		}
+		var f File
+		for {
+			part, err := mr.NextPart()
+			if err != nil {
+				break
+			}
+			b, _ := io.ReadAll(part)
+			if strings.HasPrefix(part.Header.Get("Content-Type"), "application/json") {
+				_ = json.Unmarshal(b, &meta)
+			} else {
+				f = File{Type: part.Header.Get("Content-Type"), Data: b}
+			}
+		}
+		f.Name = meta.Filename
+		ref := strings.TrimSuffix(strings.TrimPrefix(p, "/chat/upload/v1/"), "/attachments:upload") + "/attachments/" + s.id()
+		if s.uploads == nil {
+			s.uploads = map[string]File{}
+		}
+		s.uploads[ref] = f
+		write(w, map[string]any{"attachmentDataRef": map[string]string{"resourceName": ref}})
 	case strings.HasPrefix(p, "/chat/v1/spaces/") && strings.HasSuffix(p, "/messages"):
 		name := strings.TrimSuffix(strings.TrimPrefix(p, "/chat/v1/"), "/messages")
 		if s.space(name) == nil {
@@ -327,6 +444,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.Method == "POST" {
 			m := &ChatMessage{Name: name + "/messages/" + s.id(), Space: name, Sender: s.Me, Text: fmt.Sprint(body["text"]), Created: time.Now()}
+			if atts, ok := body["attachment"].([]any); ok {
+				for _, a := range atts {
+					ref, _ := a.(map[string]any)["attachmentDataRef"].(map[string]any)
+					if f, ok := s.uploads[fmt.Sprint(ref["resourceName"])]; ok {
+						m.Files = append(m.Files, f)
+					}
+				}
+			}
 			if th, ok := body["thread"].(map[string]any); ok {
 				m.Thread = fmt.Sprint(th["name"])
 			} else {
@@ -351,8 +476,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		sort.Slice(msgs, func(i, j int) bool { return msgs[i].Created.After(msgs[j].Created) })
 		var out []any
 		for _, m := range msgs {
+			var atts []any
+			for i, f := range m.Files {
+				ref := fmt.Sprintf("%s/attachments/f%d", m.Name, i)
+				if s.uploads == nil {
+					s.uploads = map[string]File{}
+				}
+				s.uploads[ref] = f
+				atts = append(atts, map[string]any{"contentName": f.Name, "contentType": f.Type, "source": "UPLOADED_CONTENT",
+					"attachmentDataRef": map[string]string{"resourceName": ref}})
+			}
 			out = append(out, map[string]any{"name": m.Name, "text": m.Text, "createTime": m.Created.UTC().Format(time.RFC3339Nano),
-				"sender": map[string]string{"name": m.Sender, "type": "HUMAN"}, "thread": map[string]string{"name": m.Thread}})
+				"sender": map[string]string{"name": m.Sender, "type": "HUMAN"}, "thread": map[string]string{"name": m.Thread}, "attachment": atts})
 		}
 		write(w, map[string]any{"messages": out})
 	case strings.HasPrefix(p, "/people/v1/people/"):
@@ -438,7 +573,8 @@ func (s *Server) Seed() {
 	s.AddMail(Message{ThreadID: "t-ci", ID: "t-ci", Labels: []string{"INBOX"}, From: "CI <ci@example.com>", To: s.Email,
 		Subject: "Build #1932 passed on main", Body: "main @ 4f1c2e9 · 6m 12s · 412 tests passed", Date: now.Add(-26 * time.Hour)})
 	s.AddMail(Message{ThreadID: "t-hr", ID: "t-hr", Labels: []string{"INBOX"}, From: "HR Team <hr@example.com>", To: "all@example.com",
-		Subject: "Holiday list for 2027", Body: "Dear all,\n\nPlease find the 2027 holiday calendar on the intranet.\n\nRegards,\nHR", Date: now.Add(-25 * time.Hour)})
+		Subject: "Holiday list for 2027", Body: "Dear all,\n\nPlease find the 2027 holiday calendar attached.\n\nRegards,\nHR", Date: now.Add(-25 * time.Hour),
+		Files: []File{{Name: "holidays-2027.csv", Type: "text/csv", Data: []byte("date,holiday\n2027-01-26,Republic Day\n2027-08-15,Independence Day\n")}}})
 	s.AddMail(Message{ThreadID: "t-arjun", ID: "t-arjun", Labels: []string{"INBOX", "UNREAD"}, From: "Arjun Mehta <arjun.m@example.com>", To: s.Email,
 		Subject: "Re: staging DB credentials", Body: "Rotated them, new ones are in the vault under staging/db.\nOld ones stop working at 18:00 today.\n\nA", Date: today(8, 55)})
 	s.AddMail(Message{ThreadID: "t-gh", ID: "t-gh", Labels: []string{"INBOX", "UNREAD"}, From: "GitHub <notifications@github.com>", To: s.Email,
@@ -459,7 +595,8 @@ func (s *Server) Seed() {
 	s.AddSpace(Space{Name: "spaces/all", DisplayName: "everyone", Type: "SPACE", Members: []string{"users/1", "users/4"}, LastRead: now})
 	s.AddChat(ChatMessage{Space: "spaces/all", Sender: "users/4", Text: "standup moved to 10:30 today", Created: today(8, 15)})
 	s.AddChat(ChatMessage{Space: "spaces/portal-dev", Sender: "users/3", Text: "deploy to staging done", Created: today(9, 28)})
-	s.AddChat(ChatMessage{Space: "spaces/portal-dev", Sender: "users/4", Text: "smoke tests green", Created: today(9, 29)})
+	s.AddChat(ChatMessage{Space: "spaces/portal-dev", Sender: "users/4", Text: "smoke tests green, report attached", Created: today(9, 29),
+		Files: []File{{Name: "smoke-report.txt", Type: "text/plain", Data: []byte("412 passed, 0 failed\n")}}})
 	s.AddChat(ChatMessage{Space: "spaces/portal-dev", Sender: "users/3", Text: "@You can you look at #412 before lunch?", Created: today(9, 30)})
 	s.AddChat(ChatMessage{Space: "spaces/dm-priya", Sender: "users/2", Text: "can you check my mail? need the release answer today", Created: today(9, 44)})
 }

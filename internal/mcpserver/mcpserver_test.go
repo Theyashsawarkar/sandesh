@@ -3,6 +3,7 @@ package mcpserver_test
 import (
 	"context"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +71,7 @@ func call(t *testing.T, cs *mcp.ClientSession, name string, args map[string]any)
 func TestTools(t *testing.T) {
 	a, g, cs := session(t)
 	tools, err := cs.ListTools(context.Background(), nil)
-	if err != nil || len(tools.Tools) != 11 {
+	if err != nil || len(tools.Tools) != 12 {
 		t.Fatalf("tools: %v %v", len(tools.Tools), err)
 	}
 	out := call(t, cs, "mail_list", map[string]any{"today": true})
@@ -96,6 +97,16 @@ func TestTools(t *testing.T) {
 	out = call(t, cs, "chat_read", map[string]any{"space": "portal"})
 	if !strings.Contains(out, "smoke tests green") {
 		t.Fatalf("chat_read: %s", out)
+	}
+	// downloads land only inside the downloads folder, whatever is asked
+	dl := t.TempDir()
+	t.Setenv("SANDESH_DOWNLOADS", dl)
+	out = call(t, cs, "attachment_save", map[string]any{"thread_id": "t-hr", "subfolder": "../../etc"})
+	if !strings.Contains(out, filepath.Join(dl, "etc", "holidays-2027.csv")) || !strings.Contains(out, "untrusted") {
+		t.Fatalf("attachment_save: %s", out)
+	}
+	if !strings.Contains(call(t, cs, "chat_read", map[string]any{"space": "portal"}), "file 1: smoke-report.txt") {
+		t.Fatal("chat_read doesn't list files")
 	}
 	out = call(t, cs, "mail_modify", map[string]any{"thread_ids": []string{"t-ci"}, "action": "archive"})
 	if !strings.Contains(out, "archive: t-ci") {

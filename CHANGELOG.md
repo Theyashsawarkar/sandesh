@@ -4,6 +4,18 @@ Newest first.
 
 ## Unreleased
 
+- **Files, both ways**: `v` saves a mail's attachments or a chat's files to
+  `~/Downloads/sandesh` (an fzf picker when there are several), `V` saves
+  and opens them. Send files with `Attach:` in the mail editor, `+` on the
+  review screen, or `U` in a chat space; `--attach` on `mail send` and
+  `chat send`; `mail save` / `chat save` download from the shell. Big mails
+  (over 4 MB) go through Gmail's upload endpoint. Files are copied privately
+  when queued, so what you reviewed is what is sent.
+- **Agents and files**: `mail_send`, `mail_draft` and `chat_send` take
+  `attachments`; such sends always ask for approval, which lists each file.
+  New `attachment_save` tool, confined to the downloads folder.
+- Other people's chat messages get a solid bar in their colour.
+
 - **Follows the desktop theme live**: colours come from varna's
   `palette.json` (sandesh's own pick under `tools.sandesh` if the theme has
   one) and change on the running screen when the theme changes; `[colors]`

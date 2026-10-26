@@ -85,7 +85,7 @@ func Open(path string) (*Store, error) {
 }
 
 // schemaVersion: bump it with a step in migrate.
-const schemaVersion = 5
+const schemaVersion = 6
 
 func migrate(db *sql.DB) error {
 	var v int
@@ -128,6 +128,16 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 		if _, err := db.Exec(`DELETE FROM chat_messages WHERE text='(a message with no text)'`); err != nil {
+			return err
+		}
+	}
+	if v < 6 {
+		// v6: chat messages keep their files, so they can be downloaded;
+		// spaces with files in them are fetched again to fill it in
+		if _, err := db.Exec(`ALTER TABLE chat_messages ADD COLUMN files TEXT NOT NULL DEFAULT '[]'`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+		if _, err := db.Exec(`UPDATE spaces SET synced_to=0 WHERE name IN (SELECT DISTINCT space FROM chat_messages WHERE text LIKE '%📎%')`); err != nil {
 			return err
 		}
 	}
@@ -649,15 +659,25 @@ type Space struct {
 }
 
 type ChatMessage struct {
-	Account    string `json:"-"`
-	Name       string `json:"id"`
-	Space      string `json:"space"`
-	Thread     string `json:"thread,omitempty"`
-	Sender     string `json:"-"`
-	SenderName string `json:"from"`
-	Text       string `json:"text"`
-	Created    int64  `json:"time"`
-	Mine       bool   `json:"mine,omitempty"`
+	Account    string     `json:"-"`
+	Name       string     `json:"id"`
+	Space      string     `json:"space"`
+	Thread     string     `json:"thread,omitempty"`
+	Sender     string     `json:"-"`
+	SenderName string     `json:"from"`
+	Text       string     `json:"text"`
+	Created    int64      `json:"time"`
+	Mine       bool       `json:"mine,omitempty"`
+	Files      []ChatFile `json:"files,omitempty"`
+}
+
+// ChatFile is a file in a chat message: Ref is Chat's media name (it can
+// be downloaded), Drive a Drive file id (opened in the browser).
+type ChatFile struct {
+	Name  string `json:"name"`
+	Type  string `json:"type,omitempty"`
+	Ref   string `json:"ref,omitempty"`
+	Drive string `json:"drive,omitempty"`
 }
 
 func (s *Store) PutSpace(sp Space) error {
@@ -665,6 +685,19 @@ func (s *Store) PutSpace(sp Space) error {
 	  ON CONFLICT(account,name) DO UPDATE SET display_name=CASE WHEN excluded.display_name<>'' THEN excluded.display_name ELSE display_name END,
 	  type=excluded.type, last_active=MAX(last_active,excluded.last_active)`, sp.Account, sp.Name, sp.DisplayName, sp.Type, sp.LastActive)
 	return err
+}
+
+// ChatMessage returns one stored chat message.
+func (s *Store) ChatMessage(account, name string) (ChatMessage, error) {
+	var m ChatMessage
+	var files string
+	err := s.db.QueryRow(`SELECT account,name,space,thread,sender,sender_name,text,created,files FROM chat_messages WHERE account=? AND name=?`, account, name).
+		Scan(&m.Account, &m.Name, &m.Space, &m.Thread, &m.Sender, &m.SenderName, &m.Text, &m.Created, &files)
+	if err != nil {
+		return m, err
+	}
+	_ = json.Unmarshal([]byte(files), &m.Files)
+	return m, nil
 }
 
 // ResetDMTitles forgets DM and group titles so they are worked out again.
@@ -702,9 +735,13 @@ func (s *Store) PutChatMessages(msgs []ChatMessage) error {
 	}
 	defer tx.Rollback()
 	for _, m := range msgs {
-		if _, err := tx.Exec(`INSERT INTO chat_messages(account,name,space,thread,sender,sender_name,text,created) VALUES(?,?,?,?,?,?,?,?)
-		  ON CONFLICT(account,name) DO UPDATE SET text=excluded.text, sender_name=CASE WHEN excluded.sender_name<>'' THEN excluded.sender_name ELSE sender_name END`,
-			m.Account, m.Name, m.Space, m.Thread, m.Sender, m.SenderName, m.Text, m.Created); err != nil {
+		files, _ := json.Marshal(m.Files)
+		if m.Files == nil {
+			files = []byte("[]")
+		}
+		if _, err := tx.Exec(`INSERT INTO chat_messages(account,name,space,thread,sender,sender_name,text,created,files) VALUES(?,?,?,?,?,?,?,?,?)
+		  ON CONFLICT(account,name) DO UPDATE SET text=excluded.text, files=excluded.files, sender_name=CASE WHEN excluded.sender_name<>'' THEN excluded.sender_name ELSE sender_name END`,
+			m.Account, m.Name, m.Space, m.Thread, m.Sender, m.SenderName, m.Text, m.Created, string(files)); err != nil {
 			return err
 		}
 	}
@@ -760,7 +797,7 @@ func (s *Store) ChatMessages(account, space string, limit int) ([]ChatMessage, e
 	if limit <= 0 {
 		limit = 200
 	}
-	rows, err := s.db.Query(`SELECT c.account,c.name,c.space,c.thread,c.sender,c.sender_name,c.text,c.created, c.sender=a.chat_user
+	rows, err := s.db.Query(`SELECT c.account,c.name,c.space,c.thread,c.sender,c.sender_name,c.text,c.created, c.sender=a.chat_user, c.files
 	  FROM chat_messages c JOIN accounts a ON a.name=c.account WHERE c.account=? AND c.space=? ORDER BY c.created DESC LIMIT ?`, account, space, limit)
 	if err != nil {
 		return nil, err
@@ -769,9 +806,11 @@ func (s *Store) ChatMessages(account, space string, limit int) ([]ChatMessage, e
 	var out []ChatMessage
 	for rows.Next() {
 		var m ChatMessage
-		if err := rows.Scan(&m.Account, &m.Name, &m.Space, &m.Thread, &m.Sender, &m.SenderName, &m.Text, &m.Created, &m.Mine); err != nil {
+		var files string
+		if err := rows.Scan(&m.Account, &m.Name, &m.Space, &m.Thread, &m.Sender, &m.SenderName, &m.Text, &m.Created, &m.Mine, &files); err != nil {
 			return nil, err
 		}
+		_ = json.Unmarshal([]byte(files), &m.Files)
 		out = append(out, m)
 	}
 	// oldest first

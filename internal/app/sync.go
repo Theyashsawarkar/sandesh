@@ -416,6 +416,16 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 			}
 			cm := store.ChatMessage{Account: acc.Name, Name: m.Name, Space: gs.Name, Thread: m.Thread.Name, Sender: m.Sender.Name,
 				SenderName: name, Text: mime.Clean(m.Display()), Created: created}
+			for _, at := range m.Attachment {
+				f := store.ChatFile{Name: mime.Clean(at.ContentName), Type: at.ContentType}
+				if at.AttachmentDataRef != nil {
+					f.Ref = at.AttachmentDataRef.ResourceName
+				}
+				if at.DriveDataRef != nil {
+					f.Drive = at.DriveDataRef.DriveFileID
+				}
+				cm.Files = append(cm.Files, f)
+			}
 			out = append(out, cm)
 			if created > newest {
 				newest = created

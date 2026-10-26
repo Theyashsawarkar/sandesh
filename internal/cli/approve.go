@@ -162,6 +162,9 @@ func RenderApproval(it store.OutboxItem, out store.Outgoing) string {
 			fmt.Fprintf(&b, "  Reply in thread %s\n", out.ThreadID)
 		}
 	}
+	for _, f := range out.Files {
+		fmt.Fprintf(&b, "  \033[33mFile:    📎 %s (%s) from %s\033[0m\n", f.Name, app.HumanSize(f.Size), f.Source)
+	}
 	b.WriteString("  " + strings.Repeat("─", 60) + "\n")
 	for _, l := range strings.Split(out.Body, "\n") {
 		b.WriteString("  " + l + "\n")

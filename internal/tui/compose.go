@@ -83,6 +83,13 @@ func (m Model) afterEdit(msg editedMsg) (tea.Model, tea.Cmd) {
 	if msg.approveID > 0 {
 		// an agent's message, edited: back to the approval view with it
 		if ok {
+			if files, err := m.a.ResolveFiles(out.Files); err != nil {
+				m.setErr(err.Error())
+				m.mode = modeApprove
+				return m, nil
+			} else {
+				out.Files = files
+			}
 			for i := range m.waiting {
 				if m.waiting[i].ID == msg.approveID {
 					m.waiting[i].Out = out
@@ -187,6 +194,12 @@ func (m Model) reviewKey(s string) (tea.Model, tea.Cmd) {
 			_, err := m.a.SaveDraft(ctx, acc, out)
 			return err
 		})
+	case "+":
+		return m, m.pickFiles("review")
+	case "-":
+		if n := len(r.out.Files); n > 0 {
+			r.out.Files = r.out.Files[:n-1]
+		}
 	case "n", "q", "esc":
 		m.review, m.mode = nil, modeNormal
 		m.say("discarded")

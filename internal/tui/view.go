@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/Theyashsawarkar/sandesh/internal/app"
 	"github.com/Theyashsawarkar/sandesh/internal/config"
 	"github.com/Theyashsawarkar/sandesh/internal/store"
 )
@@ -73,7 +74,7 @@ func (m Model) View() string {
 	case modeHelp:
 		right = m.box(pw, bh, "keys", m.helpView(pw-4, bh-2), true, m.styles.c.Accent)
 	case modeReview:
-		right = m.box(pw, bh, "review: y send · e edit · d draft · n discard", m.reviewView(pw-4, bh-2), true, m.styles.c.Accent2)
+		right = m.box(pw, bh, "review: y send · e edit · + file · d draft · n discard", m.reviewView(pw-4, bh-2), true, m.styles.c.Accent2)
 	case modeApprove:
 		right = m.box(pw, bh, "an agent wants to send: y send · e edit · n decline · q later", m.approveView(pw-4, bh-2), true, m.styles.c.Peach)
 	default:
@@ -330,6 +331,14 @@ func (m Model) outgoingView(kind string, out store.Outgoing, note string, w int)
 		field("Cc", strings.Join(out.Cc, ", "))
 		field("Bcc", strings.Join(out.Bcc, ", "))
 		field("Subject", out.Subject)
+	}
+	for _, f := range out.Files {
+		size := ""
+		if f.Size > 0 {
+			size = "  " + app.HumanSize(f.Size)
+		}
+		lines = append(lines, s.muted.Render(fmt.Sprintf("%-8s", "File"))+s.peach.Render("📎 "+firstNonEmpty(f.Name, f.Source))+
+			s.muted.Render(size+"  "+firstNonEmpty(f.Source, "")))
 	}
 	lines = append(lines, s.muted.Render(strings.Repeat("─", min(w, 60))))
 	for _, l := range wrap(out.Body, w) {

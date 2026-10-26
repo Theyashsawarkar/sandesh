@@ -35,7 +35,19 @@ type Outgoing struct {
 	SpaceName string `json:"space_name,omitempty"`
 	Thread    string `json:"thread,omitempty"`
 	// both
-	Body string `json:"body"`
+	Body  string `json:"body"`
+	Files []File `json:"files,omitempty"`
+}
+
+// File is an attachment to send: a private copy made when it was queued
+// (so what was approved is what goes out).
+type File struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Size int64  `json:"size"`
+	Path string `json:"path"` // the private copy; "" until it is made
+	// Source is where it came from, as typed (shown in the editor)
+	Source string `json:"source,omitempty"`
 }
 
 type OutboxItem struct {

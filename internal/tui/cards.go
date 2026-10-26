@@ -306,8 +306,12 @@ func (m *Model) mailLines(t store.Thread, w int) []string {
 			body = renumber(body, base)
 		}
 		lines = append(lines, body...)
-		for _, at := range msg.Attachments {
-			lines = append(lines, "", s.peach.Render("📎 "+at.Name)+s.muted.Render(" · "+sizeOf(at.Size)))
+		if len(msg.Attachments) > 0 {
+			lines = append(lines, "")
+			for _, at := range msg.Attachments {
+				lines = append(lines, s.peach.Render("📎 "+at.Name)+s.muted.Render(" · "+sizeOf(at.Size)))
+			}
+			lines = append(lines, s.muted.Render("   v saves · V opens"))
 		}
 		if len(res.Links) > 0 {
 			lines = append(lines, "")
@@ -450,7 +454,7 @@ func (m *Model) chatLines(w int) []string {
 		if c.Mine {
 			color = s.c.Green
 		}
-		bar := fg(color).Render("▎")
+		bar := fg(color).Bold(true).Render("┃")
 		out = append(out, "")
 		head := m.avatar(name) + " " + fg(color).Bold(true).Render(name) + " " + s.muted.Render(t.Format("15:04"))
 		if c.Mine {
@@ -465,7 +469,14 @@ func (m *Model) chatLines(w int) []string {
 				lines = append(lines, s.muted.Render("↳ reply in a thread"))
 			}
 			for _, l := range wrap(mime.Clean(g.Text), bw-3) {
+				if strings.HasPrefix(l, "📎 ") {
+					lines = append(lines, s.peach.Render(l))
+					continue
+				}
 				lines = append(lines, styleMentions(l, s.text, mention))
+			}
+			if len(g.Files) > 0 {
+				lines = append(lines, s.muted.Render("v saves · V opens"))
 			}
 			if first[g.Thread] == g.Name && threadCount[g.Thread] > 1 {
 				lines = append(lines, s.muted.Render(fmt.Sprintf("↳ %d %s in this thread", threadCount[g.Thread]-1,

@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -240,5 +242,92 @@ func TestSearchServer(t *testing.T) {
 	}
 	if !a.RemoveSearch("GitHub") || len(a.SavedSearches()) != 0 {
 		t.Fatal("remove search")
+	}
+}
+
+func TestAttachments(t *testing.T) {
+	a, g := setup(t)
+	ctx := context.Background()
+	if _, errs := a.SyncAll(ctx); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	dl := t.TempDir()
+
+	// mail: listed at sync, downloaded on demand, never overwriting
+	msgs, _ := a.Store.Messages("work", "t-hr")
+	if len(msgs) != 1 || len(msgs[0].Attachments) != 1 || msgs[0].Attachments[0].Name != "holidays-2027.csv" {
+		t.Fatalf("mail attachments: %+v", msgs)
+	}
+	p1, err := a.SaveMailAttachment(ctx, "work", msgs[0].ID, 0, dl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, _ := a.SaveMailAttachment(ctx, "work", msgs[0].ID, 0, dl)
+	if filepath.Base(p1) != "holidays-2027.csv" || filepath.Base(p2) != "holidays-2027 (2).csv" {
+		t.Fatalf("saved as %s and %s", p1, p2)
+	}
+	if b, _ := os.ReadFile(p1); !strings.Contains(string(b), "Republic Day") {
+		t.Fatalf("content: %q", b)
+	}
+
+	// chat: the file's reference is kept and downloads
+	cm, _ := a.Store.ChatMessages("work", "spaces/portal-dev", 0)
+	var withFile store.ChatMessage
+	for _, m := range cm {
+		if len(m.Files) > 0 {
+			withFile = m
+		}
+	}
+	if withFile.Files == nil || withFile.Files[0].Ref == "" {
+		t.Fatalf("chat files: %+v", cm)
+	}
+	p3, err := a.SaveChatAttachment(ctx, "work", withFile.Name, 0, dl)
+	if b, _ := os.ReadFile(p3); err != nil || string(b) != "412 passed, 0 failed\n" {
+		t.Fatalf("chat download: %v %q", err, b)
+	}
+
+	// sending: private copies, multipart mail, uploaded chat file
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	_ = os.WriteFile(src, []byte("hello file"), 0o644)
+	files, err := a.AttachFiles([]string{src})
+	if err != nil || len(files) != 1 || files[0].Path == src || files[0].Type != "text/plain; charset=utf-8" {
+		t.Fatalf("attach: %+v %v", files, err)
+	}
+	if _, err := a.Queue("work", "mail", store.Outgoing{To: []string{"rohan.d@example.com"}, Subject: "file", Body: "see attached", Files: files}, OriginYou); err != nil {
+		t.Fatal(err)
+	}
+	if done := a.DeliverDue(ctx); len(done) != 1 || done[0].Status != store.StatusSent {
+		t.Fatalf("deliver: %+v", done)
+	}
+	last := g.Messages[len(g.Messages)-1]
+	if len(last.Files) != 1 || string(last.Files[0].Data) != "hello file" || last.Body != "see attached" {
+		t.Fatalf("sent mail: %+v", last)
+	}
+	if _, err := os.Stat(files[0].Path); !os.IsNotExist(err) {
+		t.Fatal("private copy kept after sending")
+	}
+	files, _ = a.AttachFiles([]string{src})
+	if _, err := a.Queue("work", "chat", store.Outgoing{Space: "spaces/portal-dev", Files: files}, OriginYou); err != nil {
+		t.Fatal(err)
+	}
+	if done := a.DeliverDue(ctx); len(done) != 1 || done[0].Status != store.StatusSent {
+		t.Fatalf("chat deliver: %+v", done)
+	}
+	if c := g.Chat[len(g.Chat)-1]; len(c.Files) != 1 || c.Files[0].Name != "notes.txt" {
+		t.Fatalf("chat upload: %+v", c)
+	}
+
+	// an agent's files always ask, whatever the policy
+	a.Config.SendPolicy = config.PolicyAllow
+	files, _ = a.AttachFiles([]string{src})
+	it, _ := a.Queue("work", "mail", store.Outgoing{To: []string{"rohan.d@example.com"}, Subject: "x", Body: "b", Files: files}, OriginAgent)
+	if it.Status != store.StatusApproval {
+		t.Fatalf("agent files went out without asking: %+v", it)
+	}
+	if _, err := a.AttachFiles([]string{"/nonexistent/x"}); err == nil {
+		t.Fatal("missing file attached")
+	}
+	if _, err := a.AttachFiles([]string{t.TempDir()}); err == nil {
+		t.Fatal("a folder attached")
 	}
 }

@@ -219,7 +219,7 @@ func When(ms int64) string {
 
 func mail(a *app.App, args []string) error {
 	if len(args) == 0 {
-		return usageError("mail what? list, read, search, send, archive, trash, read, unread, star (sandesh --help)")
+		return usageError("mail what? list, read, search, send, save, archive, trash, read, unread, star (sandesh --help)")
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -231,6 +231,8 @@ func mail(a *app.App, args []string) error {
 		return mailSearch(a, rest)
 	case "send":
 		return mailSend(a, rest)
+	case "save", "download":
+		return mailSave(a, rest)
 	case "archive", "unarchive", "trash", "untrash", "mark-read", "unread", "star", "unstar":
 		return mailModify(a, sub, rest)
 	}
@@ -378,6 +380,7 @@ func mailRead(a *app.App, args []string) error {
 // FormatThread renders a thread as plain text.
 func FormatThread(t store.Thread, msgs []store.Message) string {
 	var b strings.Builder
+	n := 0 // attachments are numbered across the thread, for mail save
 	fmt.Fprintf(&b, "%s\n%s\n", t.Subject, strings.Repeat("─", min(60, max(10, len([]rune(t.Subject))))))
 	for i, m := range msgs {
 		if i > 0 {
@@ -392,7 +395,8 @@ func FormatThread(t store.Thread, msgs []store.Message) string {
 		}
 		fmt.Fprintf(&b, "Date: %s\n\n%s\n", time.UnixMilli(m.Date).Format("Mon 02 Jan 2006 15:04"), m.Body)
 		for _, at := range m.Attachments {
-			fmt.Fprintf(&b, "📎 %s (%s)\n", at.Name, humanSize(at.Size))
+			n++
+			fmt.Fprintf(&b, "📎 %d. %s (%s)\n", n, at.Name, humanSize(at.Size))
 		}
 	}
 	return b.String()
@@ -500,7 +504,7 @@ func splitAddrs(s string) []string {
 }
 
 func mailSend(a *app.App, args []string) error {
-	fs := flags("sandesh mail send", `sandesh mail send --to A[,B] [--cc C] [--subject S] [--reply THREAD] [--all] [--account A] [--now]
+	fs := flags("sandesh mail send", `sandesh mail send --to A[,B] [--cc C] [--subject S] [--attach FILE]... [--reply THREAD] [--all] [--account A] [--now]
 
 The body comes from stdin, or $EDITOR when stdin is a terminal. --reply
 answers a thread (subject, recipients and quoting filled in; --all is reply
@@ -513,6 +517,8 @@ all). The send waits undo_seconds (default 10) first: Ctrl+c cancels.`)
 	all := fs.Bool("all", false, "with --reply: reply to everyone")
 	account := fs.String("account", "", "send as this account")
 	nowFlag := fs.Bool("now", false, "skip the undo window")
+	var attach listFlag
+	fs.Var(&attach, "attach", "a file to attach (repeat for more)")
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
@@ -520,7 +526,7 @@ all). The send waits undo_seconds (default 10) first: Ctrl+c cancels.`)
 	if err != nil {
 		return err
 	}
-	out := store.Outgoing{To: splitAddrs(*to), Cc: splitAddrs(*cc), Bcc: splitAddrs(*bcc), Subject: *subject}
+	out := store.Outgoing{To: splitAddrs(*to), Cc: splitAddrs(*cc), Bcc: splitAddrs(*bcc), Subject: *subject, Files: attach.files()}
 	quoted := ""
 	if *reply != "" {
 		t, err := a.Store.FindThread(*reply)
@@ -673,7 +679,7 @@ func Forward(t store.Thread, msgs []store.Message) store.Outgoing {
 
 func chat(a *app.App, args []string) error {
 	if len(args) == 0 {
-		return usageError("chat what? list, read, send")
+		return usageError("chat what? list, read, send, save")
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -752,13 +758,21 @@ func chat(a *app.App, args []string) error {
 			if m.Mine {
 				who = "you"
 			}
-			fmt.Printf("%s  %s\n%s\n\n", who, When(m.Created), m.Text)
+			fmt.Printf("%s  %s\n%s\n", who, When(m.Created), m.Text)
+			if len(m.Files) > 0 {
+				fmt.Printf("  ↳ sandesh chat save %s\n", m.Name)
+			}
+			fmt.Println()
 		}
 		return nil
+	case "save", "download":
+		return chatSave(a, rest)
 	case "send", "post":
-		fs := flags("sandesh chat send", "sandesh chat send <space> <text...> [--thread T] [--now]\n\nPost in a space or DM (text from stdin when not given). Waits undo_seconds first.")
+		fs := flags("sandesh chat send", "sandesh chat send <space> <text...> [--attach FILE]... [--thread T] [--now]\n\nPost in a space or DM (text from stdin when not given). Waits undo_seconds first.")
 		thread := fs.String("thread", "", "reply in this thread (spaces/x/threads/y)")
 		nowFlag := fs.Bool("now", false, "skip the undo window")
+		var attach listFlag
+		fs.Var(&attach, "attach", "a file to upload with it (repeat for more)")
 		pos, err := parse(fs, rest)
 		if err != nil {
 			return err
@@ -771,20 +785,89 @@ func chat(a *app.App, args []string) error {
 			return err
 		}
 		text := strings.Join(pos[1:], " ")
-		if text == "" {
+		if text == "" && (len(attach) == 0 || !term.IsTerminal(int(os.Stdin.Fd()))) {
 			b, _ := io.ReadAll(os.Stdin)
 			text = strings.TrimSpace(string(b))
 		}
 		if *nowFlag {
 			a.Config.UndoSeconds = 0
 		}
-		it, err := a.Queue(sp.Account, "chat", store.Outgoing{Space: sp.Name, SpaceName: SpaceTitle(sp), Thread: *thread, Body: text}, app.OriginYou)
+		it, err := a.Queue(sp.Account, "chat", store.Outgoing{Space: sp.Name, SpaceName: SpaceTitle(sp), Thread: *thread, Body: text, Files: attach.files()}, app.OriginYou)
 		if err != nil {
 			return err
 		}
 		return waitSend(a, it)
 	}
 	return usageError("unknown chat command %q", sub)
+}
+
+// listFlag collects a repeated flag.
+type listFlag []string
+
+func (l *listFlag) String() string     { return strings.Join(*l, ",") }
+func (l *listFlag) Set(v string) error { *l = append(*l, v); return nil }
+func (l listFlag) files() []store.File {
+	var out []store.File
+	for _, p := range l {
+		out = append(out, store.File{Source: p})
+	}
+	return out
+}
+
+func mailSave(a *app.App, args []string) error {
+	fs := flags("sandesh mail save", `sandesh mail save <thread-id> [N|all] [--dir DIR]
+
+Downloads the thread's attachments (numbered as mail read shows them; all
+by default) into DIR, default ~/Downloads/sandesh. Never overwrites.`)
+	dir := fs.String("dir", "", "where to save")
+	pos, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) < 1 {
+		return usageError("mail save needs a thread id")
+	}
+	want := 0
+	if len(pos) > 1 && pos[1] != "all" {
+		if want, err = strconv.Atoi(pos[1]); err != nil || want < 1 {
+			return usageError("N is an attachment number from mail read, or all")
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	saved, err := a.SaveThreadAttachments(ctx, pos[0], want, *dir)
+	for _, p := range saved {
+		fmt.Println(p)
+	}
+	return err
+}
+
+func chatSave(a *app.App, args []string) error {
+	fs := flags("sandesh chat save", `sandesh chat save <message-id> [N|all] [--dir DIR]
+
+Downloads a chat message's files (chat read --json shows the ids) into
+DIR, default ~/Downloads/sandesh. Drive files open in the browser instead.`)
+	dir := fs.String("dir", "", "where to save")
+	pos, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) < 1 {
+		return usageError("chat save needs a message id (spaces/x/messages/y)")
+	}
+	want := 0
+	if len(pos) > 1 && pos[1] != "all" {
+		if want, err = strconv.Atoi(pos[1]); err != nil || want < 1 {
+			return usageError("N is a file number, or all")
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	saved, err := a.SaveChatFiles(ctx, pos[0], want, *dir)
+	for _, p := range saved {
+		fmt.Println(p)
+	}
+	return err
 }
 
 // FindSpace finds a space by id or (part of) its name.

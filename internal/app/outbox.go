@@ -24,6 +24,11 @@ const (
 // window; an agent's go through the send policy and usually wait for
 // your approval first. Returns the outbox item.
 func (a *App) Queue(account, kind string, out store.Outgoing, origin string) (store.OutboxItem, error) {
+	files, err := a.ResolveFiles(out.Files)
+	if err != nil {
+		return store.OutboxItem{}, err
+	}
+	out.Files = files
 	if err := validate(kind, out); err != nil {
 		return store.OutboxItem{}, err
 	}
@@ -61,14 +66,14 @@ func validate(kind string, out store.Outgoing) error {
 				}
 			}
 		}
-		if strings.TrimSpace(out.Body) == "" && out.DraftID == "" {
+		if strings.TrimSpace(out.Body) == "" && out.DraftID == "" && len(out.Files) == 0 {
 			return errors.New("the message is empty")
 		}
 	case "chat":
 		if out.Space == "" {
 			return errors.New("no space")
 		}
-		if strings.TrimSpace(out.Body) == "" {
+		if strings.TrimSpace(out.Body) == "" && len(out.Files) == 0 {
 			return errors.New("the message is empty")
 		}
 	default:
@@ -78,10 +83,14 @@ func validate(kind string, out store.Outgoing) error {
 }
 
 func describe(kind string, out store.Outgoing) string {
-	if kind == "chat" {
-		return "to " + firstNonEmpty(out.SpaceName, out.Space)
+	files := ""
+	for _, f := range out.Files {
+		files += fmt.Sprintf(" +file %q (%s)", f.Name, HumanSize(f.Size))
 	}
-	return fmt.Sprintf("to %s subject %q", strings.Join(append(append([]string{}, out.To...), out.Cc...), ","), out.Subject)
+	if kind == "chat" {
+		return "to " + firstNonEmpty(out.SpaceName, out.Space) + files
+	}
+	return fmt.Sprintf("to %s subject %q", strings.Join(append(append([]string{}, out.To...), out.Cc...), ","), out.Subject) + files
 }
 
 func firstNonEmpty(s ...string) string {
@@ -99,6 +108,9 @@ func (a *App) needsApproval(account, kind string, out store.Outgoing) string {
 	policy := a.Config.SendPolicy
 	if policy == config.PolicyConfirm {
 		return "send_policy is confirm"
+	}
+	if len(out.Files) > 0 {
+		return "files from this machine always ask"
 	}
 	if kind == "chat" {
 		return "chat messages from agents always ask"
@@ -128,6 +140,11 @@ func (a *App) Approve(id int64, edited *store.Outgoing) error {
 		return fmt.Errorf("#%d is %s, not waiting for approval", id, it.Status)
 	}
 	if edited != nil {
+		files, err := a.ResolveFiles(edited.Files)
+		if err != nil {
+			return err
+		}
+		edited.Files = files
 		if err := validate(it.Kind, *edited); err != nil {
 			return err
 		}
@@ -147,6 +164,11 @@ func (a *App) Approve(id int64, edited *store.Outgoing) error {
 
 func (a *App) Decline(id int64) error {
 	ok, err := a.Store.Transition(id, store.StatusApproval, store.StatusDeclined, 0)
+	if ok {
+		if it, e := a.Store.OutboxItem(id); e == nil {
+			a.dropFiles(it.Out.Files)
+		}
+	}
 	if err == nil && !ok {
 		return fmt.Errorf("#%d is not waiting for approval", id)
 	}
@@ -169,6 +191,9 @@ func (a *App) Cancel(id int64) error {
 			return a.Decline(id)
 		}
 		return fmt.Errorf("too late: #%d is %s", id, it.Status)
+	}
+	if it, err := a.Store.OutboxItem(id); err == nil {
+		a.dropFiles(it.Out.Files)
 	}
 	return nil
 }
@@ -195,6 +220,7 @@ func (a *App) DeliverDue(ctx context.Context) []store.OutboxItem {
 		} else {
 			_ = a.Store.FinishOutbox(it.ID, store.StatusSent, "", result)
 			it.Status, it.Result = store.StatusSent, result
+			a.dropFiles(it.Out.Files)
 		}
 		if it.Origin == OriginAgent {
 			a.LogAgent("deliver #%d %s %s", it.ID, it.Status, it.Error)
@@ -211,14 +237,22 @@ func (a *App) deliver(ctx context.Context, it store.OutboxItem) (string, error) 
 	}
 	out := it.Out
 	if it.Kind == "chat" {
-		return c.PostMessage(ctx, out.Space, out.Body, out.Thread)
+		refs, err := a.uploadChat(ctx, it.Account, out.Space, out.Files)
+		if err != nil {
+			return "", err
+		}
+		return c.PostMessage(ctx, out.Space, out.Body, out.Thread, refs...)
+	}
+	files, err := readFiles(out.Files)
+	if err != nil {
+		return "", err
 	}
 	acc, err := a.Store.Account(it.Account)
 	if err != nil {
 		return "", err
 	}
 	raw, err := mime.Build(mime.Draft{From: acc.Email, To: out.To, Cc: out.Cc, Bcc: out.Bcc, Subject: out.Subject, Body: out.Body,
-		InReplyTo: out.InReplyTo, References: out.References})
+		InReplyTo: out.InReplyTo, References: out.References, Files: files})
 	if err != nil {
 		return "", err
 	}
@@ -251,8 +285,16 @@ func (a *App) SaveDraft(ctx context.Context, account string, out store.Outgoing)
 	if err != nil {
 		return "", err
 	}
+	resolved, err := a.ResolveFiles(out.Files)
+	if err != nil {
+		return "", err
+	}
+	files, err := readFiles(resolved)
+	if err != nil {
+		return "", err
+	}
 	raw, err := mime.Build(mime.Draft{From: acc.Email, To: out.To, Cc: out.Cc, Bcc: out.Bcc, Subject: out.Subject, Body: out.Body,
-		InReplyTo: out.InReplyTo, References: out.References})
+		InReplyTo: out.InReplyTo, References: out.References, Files: files})
 	if err != nil {
 		return "", err
 	}

@@ -29,6 +29,9 @@
 # keybind: Tmux/sandesh | L | Add or remove a label (fzf picker)
 # keybind: Tmux/sandesh | x | Select the thread for e / d / m / M
 # keybind: Tmux/sandesh | i | Start typing a chat message right in the preview
+# keybind: Tmux/sandesh | v | Save the attachments to ~/Downloads/sandesh (picker when several)
+# keybind: Tmux/sandesh | V | Open the attachments (saved to ~/Downloads/sandesh first)
+# keybind: Tmux/sandesh | U | Send a file into this chat space (upload; fzf picker)
 # keybind: Tmux/sandesh | z | Cancel the last change, or a send in its undo window (undo)
 # keybind: Tmux/sandesh | A | Show the sends an agent is waiting on you to approve
 # keybind: Tmux/sandesh | R | Reload mail and chat from Google now (sync)
@@ -42,6 +45,8 @@
 # keybind: Tmux/sandesh | q / Esc | Go back, then quit
 # keybind: Tmux/sandesh review | y | Send the message you wrote (after the undo window)
 # keybind: Tmux/sandesh review | e | Edit the message again in your editor
+# keybind: Tmux/sandesh review | + | Add a file to the message (attach; fzf picker)
+# keybind: Tmux/sandesh review | - | Remove the last file added to the message
 # keybind: Tmux/sandesh review | d | Save the message as a Gmail draft instead of sending
 # keybind: Tmux/sandesh review | n | Delete the message you wrote (discard)
 # keybind: Tmux/sandesh approve | y | Send the message an agent wrote (after the undo window)

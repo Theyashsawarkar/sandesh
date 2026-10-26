@@ -10,13 +10,17 @@ import (
 	"github.com/Theyashsawarkar/sandesh/internal/store"
 )
 
-const marker = "-- Write below this line. Save and quit to review; an empty message is not sent. --"
+const marker = "-- Write below this line (Attach: takes file paths, comma separated). Save and quit to review; an empty message is not sent. --"
 
 // MailTemplate is the file the editor opens: a header block, then the body.
 func MailTemplate(out store.Outgoing, quoted string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "To: %s\nCc: %s\nBcc: %s\nSubject: %s\n%s\n\n", strings.Join(out.To, ", "), strings.Join(out.Cc, ", "),
-		strings.Join(out.Bcc, ", "), out.Subject, marker)
+	var files []string
+	for _, f := range out.Files {
+		files = append(files, f.Source)
+	}
+	fmt.Fprintf(&b, "To: %s\nCc: %s\nBcc: %s\nSubject: %s\nAttach: %s\n%s\n\n", strings.Join(out.To, ", "), strings.Join(out.Cc, ", "),
+		strings.Join(out.Bcc, ", "), out.Subject, strings.Join(files, ", "), marker)
 	if out.Body != "" {
 		b.WriteString(strings.TrimRight(out.Body, "\n") + "\n")
 	}
@@ -49,6 +53,22 @@ func ParseMailTemplate(text string, base store.Outgoing) (out store.Outgoing, ok
 			out.Bcc = splitAddrs(v)
 		case "subject":
 			out.Subject = v
+		case "attach", "attachments", "files":
+			// files by path, comma separated; ones already attached keep
+			// their copy
+			out.Files = nil
+			for _, p := range strings.Split(v, ",") {
+				if p = strings.TrimSpace(p); p == "" {
+					continue
+				}
+				f := store.File{Source: p}
+				for _, old := range base.Files {
+					if old.Source == p {
+						f = old
+					}
+				}
+				out.Files = append(out.Files, f)
+			}
 		}
 	}
 	out.Body = strings.Trim(body, "\n")
@@ -61,7 +81,7 @@ func ParseMailTemplate(text string, base store.Outgoing) (out store.Outgoing, ok
 			break
 		}
 	}
-	return out, written
+	return out, written || len(out.Files) > 0
 }
 
 // ChatTemplate / ParseChatTemplate: a chat message is just text.

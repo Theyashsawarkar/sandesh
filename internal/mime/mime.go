@@ -242,6 +242,14 @@ type Draft struct {
 	Body       string
 	InReplyTo  string
 	References string
+	Files      []File
+}
+
+// File is an attachment to send.
+type File struct {
+	Name string
+	Type string
+	Data []byte
 }
 
 // Build returns an RFC 5322 message, base64url-encoded for Gmail's raw
@@ -272,16 +280,87 @@ func Build(d Draft) (string, error) {
 	h("In-Reply-To", d.InReplyTo)
 	h("References", d.References)
 	h("MIME-Version", "1.0")
-	h("Content-Type", `text/plain; charset="UTF-8"`)
-	h("Content-Transfer-Encoding", "base64")
-	b.WriteString("\r\n")
-	enc := base64.StdEncoding.EncodeToString([]byte(strings.ReplaceAll(d.Body, "\n", "\r\n")))
+	text := func() {
+		b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: base64\r\n\r\n")
+		writeB64(&b, []byte(strings.ReplaceAll(d.Body, "\n", "\r\n")))
+	}
+	if len(d.Files) == 0 {
+		text()
+		return base64.URLEncoding.EncodeToString(b.Bytes()), nil
+	}
+	boundary := fmt.Sprintf("sandesh-%d", time.Now().UnixNano())
+	h("Content-Type", `multipart/mixed; boundary="`+boundary+`"`)
+	b.WriteString("\r\n--" + boundary + "\r\n")
+	text()
+	for _, f := range d.Files {
+		ct := f.Type
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		name := stdmime.QEncoding.Encode("utf-8", f.Name)
+		fmt.Fprintf(&b, "--%s\r\nContent-Type: %s; name=\"%s\"\r\nContent-Disposition: attachment; filename=\"%s\"\r\nContent-Transfer-Encoding: base64\r\n\r\n",
+			boundary, ct, name, name)
+		writeB64(&b, f.Data)
+	}
+	b.WriteString("--" + boundary + "--\r\n")
+	return base64.URLEncoding.EncodeToString(b.Bytes()), nil
+}
+
+func writeB64(b *bytes.Buffer, data []byte) {
+	enc := base64.StdEncoding.EncodeToString(data)
 	for len(enc) > 76 {
 		b.WriteString(enc[:76] + "\r\n")
 		enc = enc[76:]
 	}
 	b.WriteString(enc + "\r\n")
-	return base64.URLEncoding.EncodeToString(b.Bytes()), nil
+}
+
+// FindAttachment finds the n-th attachment (0-based, in the order Bodies
+// lists them) and returns its id, or its data when it is inline.
+func FindAttachment(p Part, n int) (name, ctype, id string, data []byte, ok bool) {
+	i := 0
+	var walk func(Part) bool
+	walk = func(p Part) bool {
+		if p.Filename != "" && p.Body.AttachmentID != "" {
+			if i == n {
+				name, ctype, id, ok = p.Filename, p.MimeType, p.Body.AttachmentID, true
+				return true
+			}
+			i++
+			return false
+		}
+		for _, c := range p.Parts {
+			if walk(c) {
+				return true
+			}
+		}
+		return false
+	}
+	walk(p)
+	return
+}
+
+// SafeName makes an attachment's name safe to save: no folders, no
+// control characters, never hidden or empty.
+func SafeName(name string) string {
+	name = Clean(name)
+	if i := strings.LastIndexAny(name, `/\`); i >= 0 {
+		name = name[i+1:]
+	}
+	name = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || strings.ContainsRune(`<>:"|?*`, r) {
+			return '_'
+		}
+		return r
+	}, strings.TrimSpace(name))
+	name = strings.TrimLeft(name, ".")
+	if name == "" {
+		name = "attachment"
+	}
+	if len(name) > 200 {
+		name = name[len(name)-200:]
+	}
+	return name
 }
 
 // ReplySubject adds "Re: " unless it is already there.

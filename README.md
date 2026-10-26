@@ -235,6 +235,9 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `L` | Add or remove a label (fzf picker) |
 | `x` | Select the thread for e / d / m / M |
 | `i` | Start typing a chat message right in the preview |
+| `v` | Save the attachments to ~/Downloads/sandesh (picker when several) |
+| `V` | Open the attachments (saved to ~/Downloads/sandesh first) |
+| `U` | Send a file into this chat space (upload; fzf picker) |
 | `z` | Cancel the last change, or a send in its undo window (undo) |
 | `A` | Show the sends an agent is waiting on you to approve |
 | `R` | Reload mail and chat from Google now (sync) |
@@ -264,9 +267,29 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 |---|---|---|
 | `y` | Send the message you wrote (after the undo window) | Send the message an agent wrote (after the undo window) |
 | `e` | Edit the message again in your editor | Edit the agent's message in your editor first |
+| `+` | Add a file to the message (attach; fzf picker) | |
+| `-` | Remove the last file added to the message | |
 | `d` | Save the message as a Gmail draft instead of sending | |
 | `n` | Delete the message you wrote (discard) | Cancel the agent's message (decline; nothing is sent) |
 | `q` | | Leave the agent's message waiting and go back |
+
+## Files
+
+- **Download**: `v` saves a mail's attachments or a chat's files to
+  `~/Downloads/sandesh` (`SANDESH_DOWNLOADS` moves it); with several, an fzf
+  picker opens (Tab picks more, Ctrl+a all). `V` saves and opens them. It
+  never overwrites: a second copy is `name (2).ext`. Chat files kept in
+  Drive open in the browser instead (`b`). From the shell: `sandesh mail
+  save THREAD [N|all]`, `sandesh chat save MESSAGE [N|all]`.
+- **Upload**: in the mail editor, `Attach: ~/report.pdf, ~/notes.txt`; or `+`
+  on the review screen to pick files. In chat, `U` picks files to post in the
+  space. From the shell: `--attach FILE` (repeatable) on `mail send` and
+  `chat send`. Up to 25 MB per message.
+- What is attached is copied when you queue the send (privately, 0600), so
+  the file you reviewed is the file that goes out. Agents can attach files
+  too, but those sends **always** wait for your approval, whatever
+  `send_policy` says, and the approval shows each file and where it came
+  from. Agents save downloads only inside the downloads folder.
 
 ## Claude and other agents
 
