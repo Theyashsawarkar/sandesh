@@ -249,8 +249,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		msgs := append([]*Message{}, s.Messages...)
 		sort.Slice(msgs, func(i, j int) bool { return msgs[i].Date.After(msgs[j].Date) })
 		query := q.Get("q")
+		var newer time.Time
+		if f, ok := strings.CutPrefix(query, "newer_than:"); ok && len(f) > 1 {
+			n, _ := strconv.Atoi(f[:len(f)-1])
+			switch f[len(f)-1] {
+			case 'd':
+				newer = time.Now().AddDate(0, 0, -n)
+			case 'm':
+				newer = time.Now().AddDate(0, -n, 0)
+			case 'y':
+				newer = time.Now().AddDate(-n, 0, 0)
+			}
+		}
 		for _, m := range msgs {
-			if seen[m.ThreadID] || has(m.Labels, "TRASH") {
+			if seen[m.ThreadID] || has(m.Labels, "TRASH") || m.Date.Before(newer) {
 				continue
 			}
 			if f, ok := strings.CutPrefix(query, "from:"); ok && !strings.Contains(strings.ToLower(m.From), strings.ToLower(strings.Fields(f)[0])) {
@@ -490,6 +502,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"sender": map[string]string{"name": m.Sender, "type": "HUMAN"}, "thread": map[string]string{"name": m.Thread}, "attachment": atts})
 		}
 		write(w, map[string]any{"messages": out})
+	case p == "/gmail/v1/users/me/settings/sendAs":
+		write(w, map[string]any{"sendAs": []map[string]any{{"sendAsEmail": s.Email, "isDefault": true,
+			"signature": "<div>Your Name<br>Example Corp · <a href=\"https://example.com\">example.com</a></div>"}}})
 	case p == "/people/v1/people:searchDirectoryPeople":
 		q := strings.ToLower(q.Get("query"))
 		var out []any

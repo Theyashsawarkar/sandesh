@@ -1,8 +1,10 @@
 package app
 
 import (
+	"fmt"
 	"github.com/Theyashsawarkar/sandesh/internal/google"
 	"github.com/Theyashsawarkar/sandesh/internal/mime"
+	"strings"
 
 	"context"
 	"encoding/json"
@@ -106,6 +108,39 @@ func (a *App) MarkSpaceUnread(ctx context.Context, account, space string) error 
 	if google.IsChatAppMissing(err) {
 		a.ChatAppMissing.Store(true)
 		return nil
+	}
+	return err
+}
+
+// Signature is the account's Gmail signature as text: from a cache file
+// (fresh for a day), else Gmail's settings. "" when there is none.
+func (a *App) Signature(ctx context.Context, account string, refresh bool) string {
+	path := filepath.Join(a.Paths.State, "signature-"+account+".txt")
+	if st, err := os.Stat(path); err == nil && (!refresh || time.Since(st.ModTime()) < 24*time.Hour) {
+		b, _ := os.ReadFile(path)
+		return string(b)
+	}
+	if !refresh {
+		return ""
+	}
+	c, err := a.Client(account)
+	if err != nil {
+		return ""
+	}
+	html, err := c.Signature(ctx)
+	if err != nil {
+		return ""
+	}
+	sig := strings.TrimSpace(mime.Clean(mime.HTMLToText(html)))
+	_ = os.WriteFile(path, []byte(sig), 0o600)
+	return sig
+}
+
+// Retry sends a failed message again (straight away).
+func (a *App) Retry(id int64) error {
+	ok, err := a.Store.Transition(id, store.StatusFailed, store.StatusQueued, time.Now().UnixMilli())
+	if err == nil && !ok {
+		err = fmt.Errorf("#%d hasn't failed", id)
 	}
 	return err
 }

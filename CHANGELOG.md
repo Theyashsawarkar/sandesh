@@ -4,6 +4,24 @@ Newest first.
 
 ## Unreleased
 
+- **Compose, redone** (from the approved mockup): a new mail gets the whole
+  screen; a reply keeps the original on the left (PgUp/PgDn). Recipients are
+  pills with initials (←/→ selects, Backspace removes); someone you've never
+  written to is marked *first time*. Suggestions highlight the typed letters
+  and say why they're there (`wrote 4× · 2d ago`, `wrote you 9×`,
+  `directory`). Cc/Bcc hidden until `Ctrl+b`. Your Gmail signature is
+  fetched and added (`Ctrl+g` toggles). Drafts are saved on disk every few
+  seconds and reopened by the same key. A status line with recipients,
+  files, words and buttons; `Ctrl+f` switches the sending account. Tab now
+  adds a typed contact and moves on.
+- **A Sent section**: who you wrote to, and whether they answered (`↩ Priya
+  replied 09:58`, `no reply yet · 2d`); mail in the outbox (sending, waiting
+  for approval, failed) on top, `z` cancels, `R` retries a failed send.
+- **All your mail, not just 30 days**: after the first sync, older mail is
+  downloaded in the background (~150 threads a minute, newest first) until
+  the mailbox is complete, with a progress bar in the top bar. `keep`
+  limits it (`"1y"`, `"6m"`, `"none"`).
+
 - **A compose screen**: `c`, `r`, `a`, `f` and `D` open a form in the right
   panel instead of a bare file in the editor: From, To, Cc, Bcc as chips,
   Subject, Files and the body, with a reply's quote folded underneath.

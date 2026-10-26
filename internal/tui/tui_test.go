@@ -77,6 +77,8 @@ func press(m Model, keys ...string) Model {
 			msg = tea.KeyMsg{Type: tea.KeyCtrlS}
 		case "down":
 			msg = tea.KeyMsg{Type: tea.KeyDown}
+		case "shift+tab":
+			msg = tea.KeyMsg{Type: tea.KeyShiftTab}
 		case "backspace":
 			msg = tea.KeyMsg{Type: tea.KeyBackspace}
 		default:
@@ -126,6 +128,10 @@ func typeText(m Model, s string) Model {
 func TestComposer(t *testing.T) {
 	m := model(t)
 	m.a.Config.UndoSeconds = 60
+	// the Gmail signature (fetched in the background when composing)
+	if sig := m.a.Signature(context.Background(), "work", true); !strings.Contains(sig, "Example Corp") {
+		t.Fatalf("signature: %q", sig)
+	}
 	m = press(m, "c")
 	if m.mode != modeCompose || !strings.Contains(m.View(), "new mail") {
 		t.Fatal("c should open the compose screen")
@@ -135,7 +141,7 @@ func TestComposer(t *testing.T) {
 	if len(m.comp.sugg) == 0 || m.comp.sugg[0].Addr != "priya.k@example.com" || !strings.Contains(m.View(), "Priya Kulkarni") {
 		t.Fatalf("suggestions: %+v", m.comp.sugg)
 	}
-	m = press(m, "tab")
+	m = press(m, "tab", "shift+tab")
 	// the directory: found after typing pauses, picked with ↓ Enter
 	m = typeText(m, "kav")
 	nm, cmd := m.Update(dirTickMsg{"kav"})
@@ -155,7 +161,8 @@ func TestComposer(t *testing.T) {
 	if got := len(m.comp.rcpt[fTo]); got != 2 {
 		t.Fatalf("recipients: %+v", m.comp.rcpt[fTo])
 	}
-	m = press(m, "tab", "tab", "tab")
+	// Cc and Bcc stay hidden until wanted: To → Subject → Files → body
+	m = press(m, "tab")
 	m = typeText(m, "Release plan")
 	m = press(m, "tab", "tab")
 	m = typeText(m, "Thursday works.")
@@ -169,27 +176,25 @@ func TestComposer(t *testing.T) {
 	}
 	out := q[0].Out
 	if strings.Join(out.To, "|") != `"Priya Kulkarni" <priya.k@example.com>|"Kavya Iyer" <kavya.i@example.com>` ||
-		out.Subject != "Release plan" || out.Body != "Thursday works." {
+		out.Subject != "Release plan" || !strings.HasPrefix(out.Body, "Thursday works.\n\n-- \n") {
 		t.Fatalf("queued: %+v", out)
 	}
 
 	// a reply: recipients and thread filled in, the quote kept under
 	m = press(m, "g", "r")
-	if m.mode != modeCompose || m.comp.focus != fBody || !strings.Contains(m.View(), "quoted lines") {
+	if m.mode != modeCompose || m.comp.focus != fBody || !strings.Contains(m.View(), "ctrl+q shows it") || !strings.Contains(m.View(), "replying to") {
 		t.Fatalf("reply composer: focus %d", m.comp.focus)
 	}
 	m = typeText(m, "Yes.")
 	m = press(m, "ctrl+s")
 	q, _ = m.a.Store.Outbox(store.StatusQueued)
 	r := q[0].Out
-	if r.ThreadID != "t-priya" || !strings.HasPrefix(r.Body, "Yes.\n\nOn ") || !strings.Contains(r.Body, "> ") {
+	if r.ThreadID != "t-priya" || !strings.HasPrefix(r.Body, "Yes.\n\n-- \n") || !strings.Contains(r.Body, "\n\nOn ") || !strings.Contains(r.Body, "> ") {
 		t.Fatalf("reply: %+v", r)
 	}
 
 	// Esc: once warns when something is written, twice discards
-	m = press(m, "c")
-	m = typeText(m, "draft text")
-	m = press(m, "tab", "tab", "tab", "tab", "tab")
+	m = press(m, "c", "tab", "tab", "tab")
 	m = typeText(m, "unsent")
 	m = press(m, "esc")
 	if m.mode != modeCompose {

@@ -245,6 +245,60 @@ func (c *Client) Profile(ctx context.Context) (email, historyID string, err erro
 	return p.EmailAddress, p.HistoryID, err
 }
 
+// Signature is the default send-as address's Gmail signature (HTML).
+func (c *Client) Signature(ctx context.Context) (string, error) {
+	var r struct {
+		SendAs []struct {
+			IsDefault bool   `json:"isDefault"`
+			Signature string `json:"signature"`
+		} `json:"sendAs"`
+	}
+	if err := c.do(ctx, "GET", c.gmail+"/users/me/settings/sendAs", nil, &r); err != nil {
+		return "", err
+	}
+	for _, s := range r.SendAs {
+		if s.IsDefault {
+			return s.Signature, nil
+		}
+	}
+	return "", nil
+}
+
+// ThreadsTotal is how many threads the mailbox holds.
+func (c *Client) ThreadsTotal(ctx context.Context) (int, error) {
+	var p struct {
+		ThreadsTotal int `json:"threadsTotal"`
+	}
+	err := c.do(ctx, "GET", c.gmail+"/users/me/profile", nil, &p)
+	return p.ThreadsTotal, err
+}
+
+// ThreadsPage returns one page of thread ids (newest first) and the token
+// for the next ("" at the end).
+func (c *Client) ThreadsPage(ctx context.Context, q, page string, max int) ([]string, string, error) {
+	v := url.Values{"maxResults": {fmt.Sprint(max)}}
+	if q != "" {
+		v.Set("q", q)
+	}
+	if page != "" {
+		v.Set("pageToken", page)
+	}
+	var r struct {
+		Threads []struct {
+			ID string `json:"id"`
+		} `json:"threads"`
+		NextPageToken string `json:"nextPageToken"`
+	}
+	if err := c.do(ctx, "GET", c.gmail+"/users/me/threads?"+v.Encode(), nil, &r); err != nil {
+		return nil, "", err
+	}
+	var ids []string
+	for _, t := range r.Threads {
+		ids = append(ids, t.ID)
+	}
+	return ids, r.NextPageToken, nil
+}
+
 // ListThreads returns thread ids matching a Gmail search, newest first,
 // up to max.
 func (c *Client) ListThreads(ctx context.Context, q string, labels []string, max int) ([]string, error) {

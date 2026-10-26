@@ -17,7 +17,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db   *sql.DB
+	path string
+}
 
 const schema = `
 CREATE TABLE IF NOT EXISTS accounts (
@@ -83,11 +86,11 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("upgrading %s: %w", path, err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, path: path}, nil
 }
 
 // schemaVersion: bump it with a step in migrate.
-const schemaVersion = 7
+const schemaVersion = 8
 
 func migrate(db *sql.DB) error {
 	var v int
@@ -147,6 +150,13 @@ func migrate(db *sql.DB) error {
 		// v7: lookups that failed (a person's name, a DM's title), so they
 		// aren't retried on every sync
 		if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tries (account TEXT NOT NULL, key TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (account, key))`); err != nil {
+			return err
+		}
+	}
+	if v < 8 {
+		// v8: the backfill of older mail, page by page
+		if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS backfill (account TEXT PRIMARY KEY, page TEXT NOT NULL DEFAULT '',
+		  done INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0, query TEXT NOT NULL DEFAULT '')`); err != nil {
 			return err
 		}
 	}
@@ -543,6 +553,78 @@ func (s *Store) FetchedSince(account, id string, since int64) bool {
 	return n > 0
 }
 
+// Backfill is how far the download of older mail has come.
+type Backfill struct {
+	Page  string // the next page of thread ids to look at
+	Done  bool
+	Total int    // threads in the mailbox (Gmail's count)
+	Query string // what it covers ("" = everything); a new one restarts it
+	Have  int    // threads in the local copy
+}
+
+func (s *Store) Backfill(account string) Backfill {
+	var b Backfill
+	_ = s.db.QueryRow(`SELECT page,done,total,query FROM backfill WHERE account=?`, account).Scan(&b.Page, &b.Done, &b.Total, &b.Query)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM threads WHERE account=?`, account).Scan(&b.Have)
+	return b
+}
+
+func (s *Store) SetBackfill(account string, b Backfill) error {
+	_, err := s.db.Exec(`INSERT INTO backfill(account,page,done,total,query) VALUES(?,?,?,?,?)
+	  ON CONFLICT(account) DO UPDATE SET page=excluded.page, done=excluded.done, total=excluded.total, query=excluded.query`,
+		account, b.Page, b.Done, b.Total, b.Query)
+	return err
+}
+
+// SentStatus is what happened after your last message in a thread.
+type SentStatus struct {
+	To        string // who your last message went to
+	SentAt    int64
+	ReplyFrom string // the first answer after it ("" = none yet)
+	ReplyAt   int64
+}
+
+// SentStatuses looks up, for each thread, your last message and the first
+// one from someone else after it: one query, no bodies.
+func (s *Store) SentStatuses(account string, ids []string) map[string]SentStatus {
+	out := map[string]SentStatus{}
+	if len(ids) == 0 {
+		return out
+	}
+	args := []any{account}
+	ph := make([]string, len(ids))
+	for i, id := range ids {
+		ph[i] = "?"
+		args = append(args, id)
+	}
+	rows, err := s.db.Query(`WITH mine AS (
+	    SELECT thread_id, MAX(date) AS at FROM messages WHERE account=?1 AND labels LIKE '%,SENT,%' AND thread_id IN (`+strings.Join(ph, ",")+`)
+	    GROUP BY thread_id)
+	  SELECT m.thread_id, m.at,
+	    (SELECT to_addrs FROM messages x WHERE x.account=?1 AND x.thread_id=m.thread_id AND x.date=m.at LIMIT 1),
+	    COALESCE((SELECT CASE WHEN from_name<>'' THEN from_name ELSE from_addr END || char(9) || date FROM messages y
+	      WHERE y.account=?1 AND y.thread_id=m.thread_id AND y.date>m.at AND y.labels NOT LIKE '%,SENT,%' ORDER BY y.date LIMIT 1), '')
+	  FROM mine m`, args...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, to, reply string
+		var st SentStatus
+		if rows.Scan(&id, &st.SentAt, &to, &reply) != nil {
+			continue
+		}
+		st.To = to
+		if name, at, ok := strings.Cut(reply, "\t"); ok {
+			st.ReplyFrom = name
+			fmt.Sscan(at, &st.ReplyAt)
+		}
+		out[id] = st
+	}
+	return out
+}
+
 // HasThread reports whether the thread is cached with this many messages.
 func (s *Store) HasThread(account, id string) bool {
 	var n int
@@ -781,6 +863,18 @@ func (s *Store) SetSpaceRead(account, space string, when int64) error {
 }
 
 // ForceSpaceRead sets the read time even backwards (marking unread).
+// Stamp changes whenever any process writes to the database (the WAL
+// file's size and time move on every commit): a cheap "anything new?".
+func (s *Store) Stamp() string {
+	st, err := os.Stat(s.path + "-wal")
+	if err != nil {
+		if st, err = os.Stat(s.path); err != nil {
+			return ""
+		}
+	}
+	return fmt.Sprint(st.Size(), st.ModTime().UnixNano())
+}
+
 // Tried notes a lookup that failed just now.
 func (s *Store) Tried(account, key string) error {
 	_, err := s.db.Exec(`INSERT INTO tries(account,key,at) VALUES(?,?,?) ON CONFLICT(account,key) DO UPDATE SET at=excluded.at`, account, key, now())

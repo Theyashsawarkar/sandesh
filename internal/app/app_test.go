@@ -365,3 +365,38 @@ func TestChatUnreadSurvivesSync(t *testing.T) {
 		t.Fatalf("sync undid mark unread: %d", unread())
 	}
 }
+
+func TestBackfillAndKeep(t *testing.T) {
+	a, g := setup(t)
+	ctx := context.Background()
+	// an old thread, outside the first sync's 30 days
+	g.Messages = append(g.Messages, &fake.Message{ID: "m-old", ThreadID: "t-old", Labels: []string{"INBOX"}, From: "Old Friend <old@example.com>",
+		To: "you@example.com", Subject: "From last year", Body: "hello from 2025", Date: time.Now().AddDate(-1, 0, 0), HistoryID: 50})
+	a.Config.InitialDays = 30
+	a.Config.Keep = "none"
+	if _, errs := a.SyncAll(ctx); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	if a.Store.HasThread("work", "t-old") {
+		t.Fatal("the first sync should only cover 30 days")
+	}
+	a.Config.Keep = "all"
+	if _, errs := a.SyncAll(ctx); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	if !a.Store.HasThread("work", "t-old") {
+		t.Fatal("the backfill should have brought the old thread in")
+	}
+	if b := a.Store.Backfill("work"); !b.Done {
+		t.Fatalf("backfill state: %+v", b)
+	}
+	// keep = none: nothing older than the first sync
+	for q, want := range map[string]string{"1y": "newer_than:1y", "6m": "newer_than:6m", "2w": "newer_than:14d", "all": ""} {
+		if got, ok := KeepQuery(q); !ok || got != want {
+			t.Errorf("KeepQuery(%q) = %q %v", q, got, ok)
+		}
+	}
+	if _, ok := KeepQuery("none"); ok {
+		t.Error("none should turn the backfill off")
+	}
+}

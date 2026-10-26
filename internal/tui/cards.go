@@ -84,6 +84,58 @@ func (s styles) avatarColors() []string {
 }
 
 // avatar is two initials on a colour picked from the name.
+// sentChip says whether a sent mail got an answer.
+func (m Model) sentChip(st store.SentStatus) string {
+	s := m.styles
+	if st.ReplyFrom != "" {
+		return m.chip("↩ "+firstWord(st.ReplyFrom)+" replied "+cli.When(st.ReplyAt), s.c.Green)
+	}
+	d := time.Since(time.UnixMilli(st.SentAt))
+	wait := "today"
+	if d >= 24*time.Hour {
+		wait = fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+	return m.chip("no reply yet · "+wait, s.c.Yellow)
+}
+
+func (m Model) outboxStatus(it store.OutboxItem) (string, string) {
+	s := m.styles
+	switch it.Status {
+	case store.StatusQueued:
+		return fmt.Sprintf("sending in %ds", max(0, int(time.Until(time.UnixMilli(it.SendAt)).Seconds()+0.5))), s.c.Yellow
+	case store.StatusSending:
+		return "sending…", s.c.Yellow
+	case store.StatusApproval:
+		return "waiting for your OK", s.c.Peach
+	}
+	return "failed", s.c.Red
+}
+
+// toNames shortens a recipient list: "Priya, Arjun, Neha +2", with names
+// from your contacts where the addresses have none.
+func (m Model) toNames(account, list string) string {
+	var names []string
+	for _, a := range mime.ParseList(list) {
+		r := m.recipFor(account, a)
+		name := r.Name
+		if name == "" {
+			name = strings.Split(r.Addr, "@")[0]
+		}
+		names = append(names, firstWord(name))
+	}
+	if len(names) > 3 {
+		return strings.Join(names[:3], ", ") + fmt.Sprintf(" +%d", len(names)-3)
+	}
+	return strings.Join(names, ", ")
+}
+
+func firstWord(s string) string {
+	if f := strings.Fields(s); len(f) > 0 {
+		return strings.Trim(f[0], `"',`)
+	}
+	return s
+}
+
 func (m Model) avatar(name string) string {
 	h := hash(name)
 	var ini []rune
@@ -143,6 +195,25 @@ func (m *Model) listView(w, h int) string {
 			if t.Unread() {
 				who, subj = s.bold.Render(t.Participants), s.text.Render(t.Subject)
 			}
+			if it, ok := m.outboxRows[t.ID]; ok {
+				// still in the outbox: who it's for, and what's happening
+				status, col := m.outboxStatus(it)
+				if !sel {
+					border = col
+				}
+				lines = []string{row(s.text.Render("→ "+m.toNames(it.Account, strings.Join(it.Out.To, ", "))), fg(col).Render(status), cw), s.text.Render(t.Subject),
+					ansi.Truncate(fg(col).Render(map[string]string{store.StatusQueued: "z cancels", store.StatusFailed: "R sends it again",
+						store.StatusApproval: "A answers it", store.StatusSending: "…"}[it.Status])+s.muted.Render("  "+oneLine(it.Out.Body)), cw, "…")}
+				for _, l := range m.cardBox(lines, cw, border, sel, false) {
+					out = append(out, " "+l)
+				}
+				out = append(out, "")
+				continue
+			}
+			sentSt, isSent := m.sentStat[t.Account+"/"+t.ID]
+			if isSent {
+				who = s.sub.Render("→ " + m.toNames(t.Account, sentSt.To))
+			}
 			if picked {
 				who = s.accent2.Render("✓ ") + who
 			}
@@ -158,6 +229,9 @@ func (m *Model) listView(w, h int) string {
 			}
 			if len(m.accounts) > 1 && m.acct < 0 {
 				chips = append(chips, m.chip(t.Account, s.c.Blue))
+			}
+			if isSent {
+				chips = append([]string{m.sentChip(sentSt)}, chips...)
 			}
 			chipStr := strings.Join(chips, " ")
 			snipW := cw - lipgloss.Width(chipStr) - 1
@@ -242,6 +316,10 @@ func (m *Model) buildPreview(w int) {
 	m.preview, m.links = nil, nil
 	if t, ok := m.curThread(); ok {
 		m.preview = m.mailLines(t, w)
+	} else if it, ok := m.curOutbox(); ok {
+		note := map[string]string{store.StatusQueued: "in its undo window · z cancels", store.StatusSending: "sending now",
+			store.StatusApproval: "an agent's mail waiting for your approval (A)", store.StatusFailed: "failed: " + it.Error + " · R sends it again"}[it.Status]
+		m.preview = strings.Split(m.outgoingView(it.Kind, it.Out, note, w), "\n")
 	} else if _, ok := m.curSpace(); ok {
 		m.preview = m.chatLines(w)
 	}
@@ -263,6 +341,9 @@ func (m *Model) mailLines(t store.Thread, w int) []string {
 	}
 	if t.Starred() {
 		chips = append(chips, m.chip("★ starred", s.c.Yellow))
+	}
+	if st, ok := m.sentStat[t.Account+"/"+t.ID]; ok {
+		chips = append(chips, m.sentChip(st))
 	}
 	chips = append(chips, m.chip(fmt.Sprintf("%d message%s", len(m.msgs), map[bool]string{true: "s"}[len(m.msgs) != 1]), s.c.Muted))
 	out = append(out, strings.Join(chips, " "), "")
@@ -544,6 +625,9 @@ func (m Model) previewBox(w, h int) string {
 	s := m.styles
 	inner := w - 4
 	title := "preview"
+	if _, ok := m.curOutbox(); ok {
+		title = "outbox"
+	}
 	if t, ok := m.curThread(); ok {
 		title = "thread · " + t.Account
 	} else if sp, ok := m.curSpace(); ok {

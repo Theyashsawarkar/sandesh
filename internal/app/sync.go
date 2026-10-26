@@ -44,8 +44,97 @@ func (a *App) SyncMail(ctx context.Context, account string) ([]News, error) {
 	news, err := a.syncMail(ctx, c, acc)
 	if err != nil {
 		_ = a.Store.SetError(account, err.Error())
+		return news, err
 	}
-	return news, err
+	// then a slice of older mail, until the whole mailbox is here
+	if _, err := a.backfill(ctx, c, acc.Name, BackfillBudget); err != nil && ctx.Err() == nil {
+		_ = a.Store.SetError(account, "older mail: "+err.Error())
+	}
+	return news, nil
+}
+
+// BackfillBudget is how many older threads one sync downloads: ~1,500
+// quota units, well inside Gmail's per-minute limit next to the rest.
+var BackfillBudget = 150
+
+// KeepQuery turns the keep setting into the Gmail search the backfill
+// covers ("" = everything; ok=false: no backfill).
+func KeepQuery(keep string) (q string, ok bool) {
+	keep = strings.ToLower(strings.TrimSpace(keep))
+	switch keep {
+	case "", "all":
+		return "", true
+	case "none", "no", "off", "0":
+		return "", false
+	}
+	n, unit := keep[:len(keep)-1], keep[len(keep)-1:]
+	if _, err := strconv.Atoi(n); err != nil {
+		return "", true
+	}
+	switch unit {
+	case "d", "m", "y":
+		return "newer_than:" + n + unit, true
+	case "w":
+		w, _ := strconv.Atoi(n)
+		return fmt.Sprintf("newer_than:%dd", 7*w), true
+	}
+	return "", true
+}
+
+// backfill downloads up to budget threads not in the local copy yet,
+// newest first, a page at a time, remembering where it got to. Returns
+// how many it fetched.
+func (a *App) backfill(ctx context.Context, c *google.Client, account string, budget int) (int, error) {
+	acc, err := a.Store.Account(account)
+	if err != nil || acc.MailSynced == 0 {
+		return 0, err
+	}
+	q, ok := KeepQuery(a.Config.Keep)
+	if !ok {
+		return 0, nil
+	}
+	b := a.Store.Backfill(account)
+	if b.Query != q { // first run, or keep changed: start over
+		b = store.Backfill{Query: q}
+	}
+	if b.Done {
+		return 0, nil
+	}
+	if b.Total == 0 || b.Page == "" {
+		if n, err := c.ThreadsTotal(ctx); err == nil {
+			b.Total = n
+		}
+	}
+	fetched := 0
+	for pages := 0; fetched < budget && pages < 10; pages++ {
+		ids, next, err := c.ThreadsPage(ctx, q, b.Page, 100)
+		if err != nil {
+			return fetched, err
+		}
+		var missing []string
+		for _, id := range ids {
+			if !a.Store.HasThread(account, id) {
+				missing = append(missing, id)
+			}
+		}
+		if len(missing) > 0 {
+			if _, err := a.fetchThreads(ctx, c, acc, missing, false); err != nil {
+				return fetched, err // the page is kept: tried again next time
+			}
+			fetched += len(missing)
+		}
+		b.Page = next
+		if next == "" {
+			b.Done = true
+		}
+		if err := a.Store.SetBackfill(account, b); err != nil {
+			return fetched, err
+		}
+		if b.Done {
+			break
+		}
+	}
+	return fetched, nil
 }
 
 func (a *App) syncMail(ctx context.Context, c *google.Client, acc store.Account) ([]News, error) {

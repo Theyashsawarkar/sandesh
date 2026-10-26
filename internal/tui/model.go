@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -99,6 +100,10 @@ type Model struct {
 	toastAt    time.Time
 	undo       *undo
 	review     *review
+	older      store.Backfill              // the download of older mail, all accounts
+	dbStamp    string                      // when the local copy last changed
+	sentStat   map[string]store.SentStatus // Sent: did they answer?
+	outboxRows map[string]store.OutboxItem // Sent: rows still in the outbox
 	comp       *composer
 	waiting    []store.OutboxItem
 	syncing    bool
@@ -186,6 +191,20 @@ func (m *Model) reload() {
 		if m.filter != "" {
 			ts = filterThreads(ts, m.filter)
 		}
+		m.sentStat, m.outboxRows = nil, nil
+		if m.search == nil && m.currentSection().Label == "SENT" {
+			ts = append(m.outboxThreads(accs), ts...)
+			m.sentStat = map[string]store.SentStatus{}
+			byAcc := map[string][]string{}
+			for _, t := range ts {
+				byAcc[t.Account] = append(byAcc[t.Account], t.ID)
+			}
+			for acc, ids := range byAcc {
+				for id, st := range m.a.Store.SentStatuses(acc, ids) {
+					m.sentStat[acc+"/"+id] = st
+				}
+			}
+		}
 		m.threads = ts
 	} else {
 		var out []store.Space
@@ -212,6 +231,17 @@ func (m *Model) reload() {
 		m.spaces = out
 	}
 	m.waiting, _ = m.a.Store.Outbox(store.StatusApproval)
+	// how far the download of older mail has come
+	m.older = store.Backfill{Done: true}
+	if _, on := app.KeepQuery(m.a.Config.Keep); on {
+		for _, acc := range m.a.AccountNames() {
+			if b := m.a.Store.Backfill(acc); !b.Done {
+				m.older.Done = false
+				m.older.Have += b.Have
+				m.older.Total += b.Total
+			}
+		}
+	}
 	// keep the selection
 	for i := 0; i < m.count(); i++ {
 		if m.keyAt(i) == keep {
@@ -269,10 +299,38 @@ func (m *Model) clamp() {
 }
 
 func (m *Model) curThread() (store.Thread, bool) {
-	if m.tab != tabMail || m.sel >= len(m.threads) {
+	if m.tab != tabMail || m.sel >= len(m.threads) || strings.HasPrefix(m.threads[m.sel].ID, outboxPrefix) {
 		return store.Thread{}, false
 	}
 	return m.threads[m.sel], true
+}
+
+// Sent shows mail still in the outbox (sending, failed) above what went out.
+const outboxPrefix = "outbox:"
+
+func (m *Model) curOutbox() (store.OutboxItem, bool) {
+	if m.tab != tabMail || m.sel >= len(m.threads) {
+		return store.OutboxItem{}, false
+	}
+	it, ok := m.outboxRows[m.threads[m.sel].ID]
+	return it, ok
+}
+
+func (m *Model) outboxThreads(accs []string) []store.Thread {
+	items, _ := m.a.Store.Outbox(store.StatusApproval, store.StatusQueued, store.StatusSending, store.StatusFailed)
+	m.outboxRows = map[string]store.OutboxItem{}
+	var out []store.Thread
+	for _, it := range items {
+		if it.Kind != "mail" || (len(accs) > 0 && !slices.Contains(accs, it.Account)) ||
+			it.Status == store.StatusFailed && time.Since(time.UnixMilli(it.Created)) > 7*24*time.Hour {
+			continue
+		}
+		id := fmt.Sprintf("%s%d", outboxPrefix, it.ID)
+		m.outboxRows[id] = it
+		out = append(out, store.Thread{Account: it.Account, ID: id, Subject: it.Out.Subject, Participants: strings.Join(it.Out.To, ", "),
+			Snippet: oneLine(it.Out.Body), LastDate: max(it.SendAt, it.Created)})
+	}
+	return out
 }
 
 func (m *Model) curSpace() (store.Space, bool) {
@@ -480,8 +538,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = ""
 		}
 		// pick up the daemon's syncs and the agents' approvals
-		if time.Now().Unix()%3 == 0 && m.mode != modeReview {
-			m.reload()
+		if time.Now().Unix()%3 == 0 && m.mode != modeReview && m.mode != modeCompose {
+			// only when another process (the daemon, an agent) wrote
+			// something; Sent also counts down its outbox rows
+			if st := m.a.Store.Stamp(); st != m.dbStamp || len(m.outboxRows) > 0 {
+				m.dbStamp = st
+				m.reload()
+			}
 		}
 		if !m.syncing && time.Since(m.lastSync) > m.a.Config.MailInterval.Duration {
 			if m.a.DaemonRunning() {
@@ -492,6 +555,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if time.Now().Unix()%2 == 0 {
 			m.recolour()
+		}
+		if m.mode == modeCompose && time.Now().Unix()%3 == 0 {
+			m.saveDraft()
 		}
 		if m.err != "" && time.Since(m.errAt) > 12*time.Second {
 			m.err = ""
@@ -558,6 +624,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.dirLookup(msg.q)
 	case dirMsg:
 		m.gotDirectory(msg)
+		return m, nil
+	case sigMsg:
+		m.gotSignature(msg)
 		return m, nil
 	case tea.KeyMsg:
 		nm, cmd := m.key(msg)
@@ -840,6 +909,15 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 			m.say("only one account (sandesh auth add <name> adds another)")
 		}
 	case "R":
+		if it, ok := m.curOutbox(); ok && it.Status == store.StatusFailed {
+			if err := m.a.Retry(it.ID); err != nil {
+				m.setErr(err.Error())
+			} else {
+				m.say("sending again…")
+				m.reload()
+			}
+			return m, m.sent(it)
+		}
 		m.say("syncing…")
 		return m, m.syncCmd()
 	case "x":
@@ -889,6 +967,15 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "z":
+		if it, ok := m.curOutbox(); ok && (it.Status == store.StatusQueued || it.Status == store.StatusApproval) {
+			if err := m.a.Cancel(it.ID); err != nil {
+				m.setErr(err.Error())
+			} else {
+				m.say("cancelled, not sent")
+				m.reload()
+			}
+			return m, nil
+		}
 		return m, m.undoCmd()
 	case "c":
 		return m, m.compose()

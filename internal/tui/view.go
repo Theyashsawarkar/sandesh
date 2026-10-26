@@ -35,6 +35,14 @@ func newStyles(c config.Colors) styles {
 	}
 }
 
+func thousands(n int) string {
+	s := fmt.Sprint(n)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
+}
+
 func (m Model) listWidth() int { return max(30, m.w*42/100) }
 
 func (m Model) bodyHeight() int {
@@ -79,16 +87,14 @@ func (m Model) View() string {
 		right = m.box(pw, bh, "review: y send · e edit · + file · d draft · n discard", m.reviewView(pw-4, bh-2), true, m.styles.c.Accent2)
 	case modeApprove:
 		right = m.box(pw, bh, "an agent wants to send: y send · e edit · n decline · q later", m.approveView(pw-4, bh-2), true, m.styles.c.Peach)
-	case modeCompose:
-		title := "new mail"
-		if m.comp != nil && m.comp.title != "" {
-			title = m.comp.title
-		}
-		right = m.box(pw, bh, title, m.composerView(pw-2, bh-2), true, m.styles.c.Accent)
 	default:
 		right = m.previewBox(pw, bh)
 	}
-	rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, left, right))
+	if m.mode == modeCompose && m.comp != nil {
+		rows = append(rows, m.composerPanes(bh))
+	} else {
+		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, left, right))
+	}
 	if len(m.waiting) > 0 && m.mode != modeApprove {
 		rows = append(rows, m.styles.banner.Render(fmt.Sprintf("󰀦 %d send(s) from an agent wait for your approval · press A", len(m.waiting))))
 	}
@@ -162,6 +168,12 @@ func (m Model) tabsView() string {
 	}
 	if m.launch == "demo" {
 		right = s.peach.Render("demo · example mail ") + right
+	}
+	if !m.older.Done && m.older.Total > m.older.Have {
+		const n = 10
+		filled := min(n, m.older.Have*n/max(1, m.older.Total))
+		bar := s.accent.Render(strings.Repeat("▰", filled)) + s.muted.Render(strings.Repeat("▱", n-filled))
+		right = s.muted.Render("older mail ") + bar + s.muted.Render(fmt.Sprintf(" %s / %s   ", thousands(m.older.Have), thousands(m.older.Total))) + right
 	}
 	gap := m.w - lipgloss.Width(left) - lipgloss.Width(right) - 1
 	if gap < 1 {
@@ -400,7 +412,10 @@ func (m Model) footerView() string {
 	case modeApprove:
 		keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"n", "decline"}, {"q", "later"}}
 	case modeCompose:
-		keys = [][2]string{{"tab", "next"}, {"↑↓", "pick"}, {"ctrl+s", "send"}, {"ctrl+d", "draft"}, {"ctrl+o", "attach"}, {"ctrl+e", "editor"}, {"esc", "cancel"}}
+		keys = [][2]string{{"tab", "next"}, {"↑↓", "pick"}, {"ctrl+o", "attach"}, {"ctrl+b", "cc/bcc"}, {"ctrl+q", "quote"}, {"ctrl+g", "signature"}}
+		if m.comp != nil && m.comp.reply {
+			keys = append(keys, [2]string{"pgup/dn", "original"})
+		}
 		if m.comp != nil && m.comp.approveID > 0 {
 			keys = [][2]string{{"tab", "next"}, {"ctrl+s", "keep changes"}, {"ctrl+e", "editor"}, {"esc", "back"}}
 		}

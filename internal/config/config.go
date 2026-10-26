@@ -93,10 +93,14 @@ type Config struct {
 	MailInterval    duration `toml:"mail_interval"`
 	ChatInterval    duration `toml:"chat_interval"`
 	InitialDays     int      `toml:"initial_days"`
-	MaxThreads      int      `toml:"max_threads"`
-	Notify          bool     `toml:"notify"`
-	AICommand       []string `toml:"ai_command"`
-	Editor          string   `toml:"editor"`
+	// Keep is how much older mail to download in the background: "all"
+	// (default), or an age like "1y", "6m", "90d"; "none" stops at the
+	// first sync
+	Keep       string   `toml:"keep"`
+	MaxThreads int      `toml:"max_threads"`
+	Notify     bool     `toml:"notify"`
+	AICommand  []string `toml:"ai_command"`
+	Editor     string   `toml:"editor"`
 	// Compose is "screen" (the built-in compose screen) or "editor"
 	// (write the whole mail in $EDITOR)
 	Compose  string    `toml:"compose"`
@@ -124,6 +128,7 @@ func Default() Config {
 		MailInterval: duration{60 * time.Second},
 		ChatInterval: duration{30 * time.Second},
 		InitialDays:  30,
+		Keep:         "all",
 		MaxThreads:   150,
 		Notify:       true,
 		AICommand:    []string{"claude", "-p"},
@@ -132,6 +137,7 @@ func Default() Config {
 			{Name: "Today", Label: "INBOX", Today: true},
 			{Name: "Unread", Label: "UNREAD"},
 			{Name: "Starred", Label: "STARRED"},
+			{Name: "Sent", Label: "SENT"},
 		},
 		// Catppuccin Mocha, the fallback when no theme is included.
 		Colors: Colors{
@@ -226,7 +232,8 @@ undo_seconds  = 10     # every mail waits this long; z (or Ctrl+c) cancels
 chat_undo_seconds = 0  # the same for chat messages (default: sent at once)
 mail_interval = "60s"  # how often the background sync checks Gmail
 chat_interval = "30s"  # and Google Chat
-initial_days  = 30     # how far back the first sync goes
+initial_days  = 30     # how far back the quick first sync goes
+keep          = "all"  # then older mail fills in, in the background: "all", "1y", "6m", "90d" or "none"
 max_threads   = 150    # at most this many threads on the first sync (older mail: search)
 notify        = true   # desktop notification for new mail and DMs
 ai_command    = ["claude", "-p"]   # what @, S, D and T run

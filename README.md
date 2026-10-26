@@ -260,26 +260,36 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `?` | Show every key |
 | `q` / `Esc` | Go back, then quit |
 
-**Writing a mail** (`c`, `r`, `a`, `f`, or `D`): the compose screen opens
-in the right panel. Type a name or part of an address in To, Cc or Bcc and
-your contacts appear, best first: people you write to most, then people who
-write to you, plus colleagues from your Google Workspace directory (needs
-the People API enabled in your Cloud project). Recipients become chips; a
-peach chip is someone you have never written to. A reply's or forward's
-original stays folded under the body. Prefer your editor? `Ctrl+e` opens
-the whole mail in it and brings it back, or set `compose = "editor"`.
+**Writing a mail** (`c`, `r`, `a`, `f`, or `D`): a new mail takes the whole
+screen; a reply keeps the message you're answering on the left (PgUp/PgDn
+scrolls it) and your reply on the right. Type a name or part of an address
+in To and your contacts appear, best first (people you write to most, then
+people who write to you, and colleagues from your Google Workspace
+directory, which needs the People API enabled in your Cloud project); the
+typed letters are highlighted. Recipients become pills; a peach one says
+*first time* for someone you've never written to. Cc and Bcc stay hidden
+until `Ctrl+b` (a reply-all shows them). Your Gmail signature is added under
+the body (`Ctrl+g` leaves it out), a reply's original stays folded under it,
+and the draft is saved on disk every few seconds: if the popup closes, the
+same `c` or `r` picks it up again. Prefer your editor? `Ctrl+e` takes the
+whole mail there and back, or set `compose = "editor"`.
 
 | Key | Compose |
 |---|---|
-| `Tab` / `Shift+Tab` | Move to the next / previous field (Tab first adds what you typed) |
+| `Tab` / `Shift+Tab` | Move to the next / previous field (Tab adds what you typed first) |
 | `Up` / `Down` | Pick a contact from the suggestions |
-| `Enter` / `,` | Add the picked contact, or the address you typed |
+| `Enter` / `,` | Add the picked contact or typed address, and stay for more |
 | `Backspace` | Remove the last recipient (in an empty To, Cc or Bcc) |
 | `Ctrl+s` | Send the mail (after the undo window) |
 | `Ctrl+d` | Save the mail as a Gmail draft and close it |
 | `Ctrl+o` | Add files to the mail (fzf picker; x removes one in Files) |
 | `Ctrl+e` | Edit the whole mail in your editor, then come back |
 | `Ctrl+q` | Toggle the quoted text under a reply or forward |
+| `Left` / `Right` | Select a recipient pill (in an empty To, Cc or Bcc; Backspace removes it) |
+| `Ctrl+b` | Toggle the Cc and Bcc fields |
+| `Ctrl+g` | Toggle your Gmail signature under the mail |
+| `Ctrl+f` | Switch the account the mail is sent from |
+| `PgUp` / `PgDn` | Scroll the message you're replying to |
 | `Esc` | Cancel the mail (twice once something is written) |
 
 **Reviewing your message** (chat written in the editor, or mail with
@@ -295,6 +305,23 @@ the whole mail in it and brings it back, or set `compose = "editor"`.
 | `d` | Save the message as a Gmail draft instead of sending | |
 | `n` | Delete the message you wrote (discard) | Cancel the agent's message (decline; nothing is sent) |
 | `q` | | Leave the agent's message waiting and go back |
+
+## Sent mail
+
+The **Sent** section (next to Starred) lists mail you sent with who it went
+to (`→ Priya, Arjun`) and whether they answered: `↩ Priya replied 09:58` or
+`no reply yet · 2d`. Mail still in the outbox sits on top: `sending in 7s`
+(`z` cancels), an agent's waiting for your OK (`A`), or `failed` in red (`R`
+sends it again).
+
+## All your mail
+
+The first sync is quick: the last `initial_days` (30) of mail, at most
+`max_threads`. After that the background sync keeps filling in older mail,
+newest first, about 150 threads a minute (well inside Gmail's limit), until
+the whole mailbox is here; the top bar shows `older mail ▰▰▱▱ 1,240 / 3,908`
+meanwhile. `keep = "1y"` (or `"6m"`, `"90d"`) stops at that age; `keep =
+"none"` keeps only the first sync's window.
 
 ## Files
 
