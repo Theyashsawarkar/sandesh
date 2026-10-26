@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Runs sandesh for the tmux plugin: the one on PATH, else the copy built in
+# this plugin's folder (bin/sandesh), building it with Go the first time.
+dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+if command -v sandesh >/dev/null 2>&1; then
+  exec sandesh "$@"
+fi
+if [ ! -x "$dir/bin/sandesh" ] || [ "$dir/go.mod" -nt "$dir/bin/sandesh" ]; then
+  if [ "${1:-}" = status ]; then exit 0; fi   # never build from the status line
+  if command -v go >/dev/null 2>&1; then
+    echo "Building sandesh (first run)..."
+    (cd "$dir" && go build -o bin/sandesh ./cmd/sandesh) || { echo "Build failed."; read -rn1; exit 1; }
+  else
+    echo "sandesh isn't installed: see https://github.com/Theyashsawarkar/sandesh#install"
+    echo "(press a key)"; read -rn1; exit 1
+  fi
+fi
+exec "$dir/bin/sandesh" "$@"

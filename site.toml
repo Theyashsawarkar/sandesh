@@ -1,0 +1,8 @@
+# The project website (docs/, GitHub Pages): built by scripts/build-site.py
+name = "sandesh"
+sanskrit = "संदेश"
+meaning = "message"
+tagline = "Gmail and Google Chat without leaving the terminal, with an agent that can read, draft and send for you."
+color = "sapphire"
+kind = "mail & chat"
+logo = "assets/logo.svg"

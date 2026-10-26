@@ -1,0 +1,47 @@
+# Maintainer: theyashsawarkar <theyashsawarkar@gmail.com>
+# Builds sandesh from the latest commit on main:
+#   cd packaging/arch && makepkg -si
+pkgname=sandesh-git
+_pkgname=sandesh
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Gmail and Google Chat in the terminal, with an MCP server for AI agents"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Theyashsawarkar/sandesh"
+license=('MIT')
+depends=('glibc')
+optdepends=('libsecret: keep sign-in tokens in the keyring (secret-tool)'
+            'libnotify: desktop notifications'
+            'tmux: the popup and status line'
+            'fzf: the label picker'
+            'wl-clipboard: copy links on Wayland'
+            'xclip: copy links on X11'
+            'claude-code: the @, S, D and T keys'
+            'ttf-nerd-fonts-symbols: icons')
+makedepends=('git' 'go')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+source=("$_pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_pkgname"
+  git describe --long --tags --abbrev=7 2>/dev/null | sed 's/^v//; s/\([^-]*-g\)/r\1/; s/-/./g' ||
+    printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+build() {
+  cd "$_pkgname"
+  export CGO_ENABLED=0 GOFLAGS="-trimpath -mod=readonly -modcacherw"
+  make build
+}
+
+check() {
+  cd "$_pkgname"
+  go test ./...
+}
+
+package() {
+  cd "$_pkgname"
+  make DESTDIR="$pkgdir" PREFIX=/usr install
+}

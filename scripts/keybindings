@@ -1,0 +1,59 @@
+# Keys inside the sandesh screen, for Vayu's keybinding search
+# (keybind-search.py reads ~/.tmux/plugins/*/scripts). Generated from
+# internal/tui/keys.go by `go test ./internal/tui -update`; don't edit.
+# keybind: Tmux/sandesh | j / k | Move to the next / previous thread or space
+# keybind: Tmux/sandesh | g / G | Jump to the first / last
+# keybind: Tmux/sandesh | h / l | Switch to the previous / next section
+# keybind: Tmux/sandesh | Tab | Switch between mail and chat
+# keybind: Tmux/sandesh | 1 / 2 | Focus the list / the preview
+# keybind: Tmux/sandesh | Enter | Open the thread or space (marks it read)
+# keybind: Tmux/sandesh | J / K | Scroll the preview down / up
+# keybind: Tmux/sandesh | E | Toggle every message in the thread open / folded
+# keybind: Tmux/sandesh | Q | Toggle the quoted text in the thread
+# keybind: Tmux/sandesh | o | Open a link from the preview by its number
+# keybind: Tmux/sandesh | Ctrl+d / Ctrl+u | Scroll the preview half a page down / up
+# keybind: Tmux/sandesh | / | Search the list as you type (local filter)
+# keybind: Tmux/sandesh | s | Search Gmail on the server (Gmail search syntax)
+# keybind: Tmux/sandesh | W | Save the current search as a section
+# keybind: Tmux/sandesh | X | Remove the current saved-search section
+# keybind: Tmux/sandesh | u | Switch account (all, then each one)
+# keybind: Tmux/sandesh | c | Create a new mail, or a new message in this space (compose)
+# keybind: Tmux/sandesh | r | Send a reply to the thread (in chat: in the latest thread)
+# keybind: Tmux/sandesh | a | Send a reply to everyone on the thread (reply all)
+# keybind: Tmux/sandesh | f | Send the thread on to someone else (forward)
+# keybind: Tmux/sandesh | e | Move the thread out of the inbox (archive; or every selected one)
+# keybind: Tmux/sandesh | d | Move the thread to the trash (or every selected one)
+# keybind: Tmux/sandesh | m | Set the thread as read (mark read; or every selected one)
+# keybind: Tmux/sandesh | M | Set the thread as unread (mark unread; or every selected one)
+# keybind: Tmux/sandesh | * | Toggle the star on the thread
+# keybind: Tmux/sandesh | L | Add or remove a label (fzf picker)
+# keybind: Tmux/sandesh | x | Select the thread for e / d / m / M
+# keybind: Tmux/sandesh | i | Start typing a chat message right in the preview
+# keybind: Tmux/sandesh | z | Cancel the last change, or a send in its undo window (undo)
+# keybind: Tmux/sandesh | A | Show the sends an agent is waiting on you to approve
+# keybind: Tmux/sandesh | R | Reload mail and chat from Google now (sync)
+# keybind: Tmux/sandesh | b | Open the thread or space in the browser
+# keybind: Tmux/sandesh | y | Copy the link to the thread or space
+# keybind: Tmux/sandesh | @ | Start a question to Claude, with this thread or space as context (ask)
+# keybind: Tmux/sandesh | S | Show Claude's summary of the thread or the space's recent messages
+# keybind: Tmux/sandesh | D | Create a reply draft with Claude, then edit it in your editor
+# keybind: Tmux/sandesh | T | Show today's digest: what came in and what needs you
+# keybind: Tmux/sandesh | ? | Show every key
+# keybind: Tmux/sandesh | q / Esc | Go back, then quit
+# keybind: Tmux/sandesh review | y | Send the message you wrote (after the undo window)
+# keybind: Tmux/sandesh review | e | Edit the message again in your editor
+# keybind: Tmux/sandesh review | d | Save the message as a Gmail draft instead of sending
+# keybind: Tmux/sandesh review | n | Delete the message you wrote (discard)
+# keybind: Tmux/sandesh approve | y | Send the message an agent wrote (after the undo window)
+# keybind: Tmux/sandesh approve | e | Edit the agent's message in your editor first
+# keybind: Tmux/sandesh approve | n | Cancel the agent's message (decline; nothing is sent)
+# keybind: Tmux/sandesh approve | q | Leave the agent's message waiting and go back
+# keybind: Tmux/sandesh setup | Tab | Switch to the next path completion (Enter on a folder opens it)
+# keybind: Tmux/sandesh setup | Enter | Save the OAuth client file at this path, or start the Google sign-in
+# keybind: Tmux/sandesh setup | Ctrl+t | Enter the OAuth client ID and secret by hand instead
+# keybind: Tmux/sandesh setup | Ctrl+o | Open the Google Cloud console credentials page
+# keybind: Tmux/sandesh setup | Ctrl+g | Show the steps for creating the OAuth client
+# keybind: Tmux/sandesh setup | Ctrl+d | Start the demo on example mail instead
+# keybind: Tmux/sandesh setup | n | Rename the account before signing in
+# keybind: Tmux/sandesh setup | c | Pick a different OAuth client file
+# keybind: Tmux/sandesh setup | y | Copy the sign-in link

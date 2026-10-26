@@ -1,0 +1,398 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/Theyashsawarkar/sandesh/internal/config"
+	"github.com/Theyashsawarkar/sandesh/internal/store"
+)
+
+type styles struct {
+	c                                             config.Colors
+	text, sub, muted, accent, accent2, bold, warn lipgloss.Style
+	green, blue, yellow, red, peach               lipgloss.Style
+	tabOn, tabOff, sel, pill, keycap, banner      lipgloss.Style
+}
+
+func newStyles(c config.Colors) styles {
+	fg := func(col string) lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color(col)) }
+	return styles{
+		c: c, text: fg(c.Text), sub: fg(c.Subtle), muted: fg(c.Muted), accent: fg(c.Accent), accent2: fg(c.Accent2),
+		bold: fg(c.Text).Bold(true), warn: fg(c.Peach), green: fg(c.Green), blue: fg(c.Blue), yellow: fg(c.Yellow), red: fg(c.Red), peach: fg(c.Peach),
+		tabOn:  lipgloss.NewStyle().Foreground(lipgloss.Color(c.Base)).Background(lipgloss.Color(c.Accent)).Bold(true).Padding(0, 1),
+		tabOff: fg(c.Muted).Padding(0, 1),
+		sel:    lipgloss.NewStyle().Background(lipgloss.Color(c.Surface)),
+		pill:   lipgloss.NewStyle().Foreground(lipgloss.Color(c.Base)).Background(lipgloss.Color(c.Accent)).Bold(true).Padding(0, 1),
+		keycap: lipgloss.NewStyle().Foreground(lipgloss.Color(c.Text)).Background(lipgloss.Color(c.Surface)).Padding(0, 1),
+		banner: lipgloss.NewStyle().Foreground(lipgloss.Color(c.Base)).Background(lipgloss.Color(c.Peach)).Bold(true).Padding(0, 1),
+	}
+}
+
+func (m Model) listWidth() int { return max(30, m.w*42/100) }
+
+func (m Model) bodyHeight() int {
+	h := m.h - 2 // tabs + footer
+	if len(m.waiting) > 0 && m.mode != modeApprove {
+		h--
+	}
+	if m.inputMode() {
+		h--
+	}
+	return max(5, h)
+}
+
+func (m Model) previewHeight() int { return m.bodyHeight() - 2 }
+
+func (m Model) inputMode() bool {
+	switch m.mode {
+	case modeFilter, modeAsk, modeSearch, modeSaveName, modeDraftHint, modeLink:
+		return true
+	}
+	return false
+}
+
+func (m Model) View() string {
+	if m.w == 0 {
+		return ""
+	}
+	var rows []string
+	rows = append(rows, m.tabsView())
+	lw := m.listWidth()
+	pw := m.w - lw
+	bh := m.bodyHeight()
+	left := m.box(lw, bh, m.listTitle(), m.listView(lw-2, bh-2), m.focus == 0 && m.mode == modeNormal, m.styles.c.Accent)
+	var right string
+	switch m.mode {
+	case modeHelp:
+		right = m.box(pw, bh, "keys", m.helpView(pw-4, bh-2), true, m.styles.c.Accent)
+	case modeReview:
+		right = m.box(pw, bh, "review: y send · e edit · d draft · n discard", m.reviewView(pw-4, bh-2), true, m.styles.c.Accent2)
+	case modeApprove:
+		right = m.box(pw, bh, "an agent wants to send: y send · e edit · n decline · q later", m.approveView(pw-4, bh-2), true, m.styles.c.Peach)
+	default:
+		right = m.previewBox(pw, bh)
+	}
+	rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, left, right))
+	if len(m.waiting) > 0 && m.mode != modeApprove {
+		rows = append(rows, m.styles.banner.Render(fmt.Sprintf("󰀦 %d send(s) from an agent wait for your approval · press A", len(m.waiting))))
+	}
+	if m.inputMode() {
+		rows = append(rows, m.inputView())
+	}
+	rows = append(rows, m.footerView())
+	return strings.Join(rows, "\n")
+}
+
+func (m Model) tabsView() string {
+	s := m.styles
+	var parts []string
+	if m.tab == tabMail {
+		for i, sec := range m.sections {
+			label := sec.Name
+			if n := m.counts[sec.Name]; n > 0 {
+				label += fmt.Sprintf(" %d", n)
+			}
+			if i == m.sec && m.search == nil {
+				parts = append(parts, s.tabOn.Render(label))
+			} else {
+				parts = append(parts, s.tabOff.Render(label))
+			}
+		}
+		if m.search != nil {
+			parts = append(parts, s.tabOn.Render(m.search.Name))
+		}
+		chat := "Chat"
+		if m.chatN > 0 {
+			chat += fmt.Sprintf(" %d", m.chatN)
+		}
+		parts = append(parts, s.muted.Render("│"), s.tabOff.Render(chat))
+	} else {
+		mail := "Mail"
+		if n := m.counts[m.sections[0].Name]; n > 0 {
+			mail += fmt.Sprintf(" %d", n)
+		}
+		parts = append(parts, s.tabOff.Render(mail), s.muted.Render("│"))
+		for i, name := range chatSections {
+			label := name
+			if name == "All" && m.chatN > 0 {
+				label += fmt.Sprintf(" %d", m.chatN)
+			}
+			if i == m.sec {
+				parts = append(parts, s.tabOn.Render(label))
+			} else {
+				parts = append(parts, s.tabOff.Render(label))
+			}
+		}
+	}
+	left := " " + strings.Join(parts, " ")
+	var right string
+	acct := "all accounts"
+	if f := m.accountFilter(); len(f) > 0 {
+		acct = f[0]
+	} else if len(m.accounts) == 1 {
+		acct = m.accounts[0]
+	}
+	switch {
+	case m.syncing:
+		right = s.muted.Render("syncing… ") + s.green.Render("●") + " " + acct
+	case m.err != "":
+		right = s.red.Render("● ") + s.text.Render(acct)
+	default:
+		right = s.green.Render("●") + " " + s.sub.Render(acct)
+	}
+	if m.launch == "demo" {
+		right = s.peach.Render("demo · example mail ") + right
+	}
+	gap := m.w - lipgloss.Width(left) - lipgloss.Width(right) - 1
+	if gap < 1 {
+		return ansi.Truncate(left, m.w, "…")
+	}
+	return left + strings.Repeat(" ", gap) + right + " "
+}
+
+// box draws a rounded border with a title in it.
+func (m Model) box(w, h int, title, content string, focus bool, color string) string {
+	s := m.styles
+	bc := s.c.Surface
+	if focus {
+		bc = color
+	}
+	b := lipgloss.NewStyle().Foreground(lipgloss.Color(bc))
+	tstyle := s.muted
+	if focus {
+		tstyle = lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true)
+	}
+	inner := w - 2
+	t := ansi.Truncate(" "+title+" ", max(0, inner-2), "…")
+	top := b.Render("╭─") + tstyle.Render(t) + b.Render(strings.Repeat("─", max(0, inner-1-lipgloss.Width(t)))+"╮")
+	lines := strings.Split(content, "\n")
+	var out []string
+	out = append(out, top)
+	for i := 0; i < h-2; i++ {
+		l := ""
+		if i < len(lines) {
+			l = lines[i]
+		}
+		l = ansi.Truncate(l, inner, "…")
+		out = append(out, b.Render("│")+l+strings.Repeat(" ", max(0, inner-lipgloss.Width(l)))+b.Render("│"))
+	}
+	out = append(out, b.Render("╰"+strings.Repeat("─", inner)+"╯"))
+	return strings.Join(out, "\n")
+}
+
+func (m Model) listTitle() string {
+	if m.tab == tabMail {
+		n := len(m.threads)
+		t := fmt.Sprintf("%s · %d", m.currentSection().Name, n)
+		if m.filter != "" {
+			t += " · /" + m.filter
+		}
+		if len(m.selected) > 0 {
+			t += fmt.Sprintf(" · %d selected", len(m.selected))
+		}
+		return t
+	}
+	t := fmt.Sprintf("%s · %d", chatSections[m.sec%len(chatSections)], len(m.spaces))
+	if m.filter != "" {
+		t += " · /" + m.filter
+	}
+	return t
+}
+
+func (m Model) aiLines(w int) []string {
+	if !m.aiBusy && m.ai == "" {
+		return nil
+	}
+	s := m.styles
+	text := m.ai
+	if m.aiBusy {
+		text = s.muted.Render("thinking…")
+	}
+	head := s.accent2.Bold(true).Render(m.aiTitle)
+	lines := []string{s.accent2.Render(strings.Repeat("┄", min(w, 60))), head}
+	body := wrap(text, w-2)
+	if len(body) > 14 {
+		body = append(body[:14], s.muted.Render("… (Esc closes)"))
+	}
+	for _, l := range body {
+		lines = append(lines, s.text.Render(l))
+	}
+	return lines
+}
+
+// helpView lists every key by group, in two columns when one is too tall.
+func (m Model) helpView(w, h int) string {
+	s := m.styles
+	var groups [][]string
+	for _, k := range Keys {
+		if k.Group == "Review" || k.Group == "Approve" || k.Group == "Setup" {
+			continue
+		}
+		if len(groups) == 0 || !strings.EqualFold(stripANSI(groups[len(groups)-1][0]), k.Group) {
+			groups = append(groups, []string{s.accent.Bold(true).Render(strings.ToLower(k.Group))})
+		}
+		g := &groups[len(groups)-1]
+		*g = append(*g, s.yellow.Render(fmt.Sprintf("%-15s", k.Keys))+" "+s.text.Render(k.Desc))
+	}
+	var one []string
+	for i, g := range groups {
+		if i > 0 {
+			one = append(one, "")
+		}
+		one = append(one, g...)
+	}
+	one = append(one, "", s.muted.Render("? or Esc closes"))
+	if len(one) <= h || w < 90 {
+		return strings.Join(one, "\n")
+	}
+	// two columns: fill the left one group by group
+	var left, right []string
+	for _, g := range groups {
+		if len(left)+len(g)+1 <= h-2 && len(right) == 0 {
+			if len(left) > 0 {
+				left = append(left, "")
+			}
+			left = append(left, g...)
+		} else {
+			if len(right) > 0 {
+				right = append(right, "")
+			}
+			right = append(right, g...)
+		}
+	}
+	right = append(right, "", s.muted.Render("? or Esc closes"))
+	cw := w/2 - 1
+	var out []string
+	for i := 0; i < max(len(left), len(right)); i++ {
+		l, r := "", ""
+		if i < len(left) {
+			l = ansi.Truncate(left[i], cw, "…")
+		}
+		if i < len(right) {
+			r = ansi.Truncate(right[i], cw, "…")
+		}
+		out = append(out, l+strings.Repeat(" ", max(1, cw-lipgloss.Width(l)+2))+r)
+	}
+	return strings.Join(out, "\n")
+}
+
+func stripANSI(s string) string { return ansi.Strip(s) }
+
+func (m Model) reviewView(w, h int) string {
+	r := m.review
+	if r == nil {
+		return ""
+	}
+	return m.outgoingView(r.kind, r.out, "", w)
+}
+
+func (m Model) approveView(w, h int) string {
+	if len(m.waiting) == 0 {
+		return ""
+	}
+	it := m.waiting[0]
+	head := ""
+	if len(m.waiting) > 1 {
+		head = fmt.Sprintf("1 of %d · ", len(m.waiting))
+	}
+	return m.outgoingView(it.Kind, it.Out, head+"asked because "+it.Reason, w)
+}
+
+func (m Model) outgoingView(kind string, out store.Outgoing, note string, w int) string {
+	s := m.styles
+	var lines []string
+	if note != "" {
+		lines = append(lines, s.muted.Render(note), "")
+	}
+	field := func(k, v string) {
+		if v != "" {
+			lines = append(lines, s.muted.Render(fmt.Sprintf("%-8s", k))+s.bold.Render(v))
+		}
+	}
+	if kind == "chat" {
+		field("To", firstNonEmpty(out.SpaceName, out.Space))
+		if out.Thread != "" {
+			field("Thread", "replying in the latest thread")
+		}
+	} else {
+		field("To", strings.Join(out.To, ", "))
+		field("Cc", strings.Join(out.Cc, ", "))
+		field("Bcc", strings.Join(out.Bcc, ", "))
+		field("Subject", out.Subject)
+	}
+	lines = append(lines, s.muted.Render(strings.Repeat("─", min(w, 60))))
+	for _, l := range wrap(out.Body, w) {
+		if strings.HasPrefix(l, ">") {
+			lines = append(lines, s.muted.Render(l))
+		} else {
+			lines = append(lines, s.text.Render(l))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func firstNonEmpty(xs ...string) string {
+	for _, x := range xs {
+		if x != "" {
+			return x
+		}
+	}
+	return ""
+}
+
+func (m Model) inputView() string {
+	s := m.styles
+	prompt := map[mode]string{modeFilter: "/", modeAsk: "@claude ", modeSearch: "search gmail: ", modeSaveName: "section name: ",
+		modeDraftHint: "draft a reply that says (Enter for Claude's pick): ", modeLink: fmt.Sprintf("open link (1-%d): ", len(m.links))}[m.mode]
+	return " " + s.accent2.Bold(true).Render(prompt) + s.text.Render(string(m.input)) + s.accent.Render("▏")
+}
+
+func (m Model) footerView() string {
+	s := m.styles
+	modeName := map[mode]string{modeNormal: "normal", modeFilter: "filter", modeAsk: "ask", modeSearch: "search", modeSaveName: "save",
+		modeDraftHint: "draft", modeReview: "review", modeApprove: "approve", modeHelp: "keys", modeChatMsg: "message", modeLink: "link"}[m.mode]
+	var keys [][2]string
+	switch m.mode {
+	case modeReview:
+		keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"d", "save draft"}, {"n", "discard"}}
+	case modeApprove:
+		keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"n", "decline"}, {"q", "later"}}
+	case modeFilter, modeAsk, modeSearch, modeSaveName, modeDraftHint, modeLink:
+		keys = [][2]string{{"enter", "done"}, {"esc", "cancel"}, {"ctrl+u", "clear"}}
+	case modeChatMsg:
+		keys = [][2]string{{"enter", "send"}, {"esc", "cancel"}, {"ctrl+u", "clear"}}
+	case modeHelp:
+		keys = [][2]string{{"?", "close"}}
+	default:
+		if m.tab == tabMail {
+			keys = [][2]string{{"j/k", "move"}, {"h/l", "section"}, {"tab", "chat"}, {"⏎", "open"}, {"m/M", "read/unread"}, {"c", "compose"}, {"r", "reply"},
+				{"e", "archive"}, {"Q", "quoted"}, {"o", "link"}, {"@", "ask"}, {"?", "keys"}}
+		} else {
+			keys = [][2]string{{"j/k", "move"}, {"h/l", "section"}, {"tab", "mail"}, {"⏎", "open"}, {"i", "type"}, {"c", "editor"}, {"r", "reply"},
+				{"m/M", "read/unread"}, {"@", "ask"}, {"S", "summary"}, {"?", "keys"}}
+		}
+	}
+	left := s.pill.Render(modeName)
+	for _, k := range keys {
+		left += " " + s.keycap.Render(k[0]) + s.muted.Render(" "+k[1])
+	}
+	right := ""
+	switch {
+	case m.err != "":
+		right = s.red.Render(m.err)
+	case m.toast != "":
+		right = s.green.Render(m.toast)
+	}
+	rw := lipgloss.Width(right)
+	if rw > m.w/2 {
+		right = ansi.Truncate(right, m.w/2, "…")
+		rw = lipgloss.Width(right)
+	}
+	left = ansi.Truncate(left, max(10, m.w-rw-2), "")
+	gap := max(1, m.w-lipgloss.Width(left)-rw-1)
+	return left + strings.Repeat(" ", gap) + right
+}

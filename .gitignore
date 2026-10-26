@@ -1,0 +1,18 @@
+/bin/
+/sandesh
+/dist/
+# never commit credentials or mail: OAuth clients, tokens, local copies
+client.json
+client_secret*.json
+*.token
+tokens/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+# makepkg output (packaging/arch)
+packaging/arch/src/
+packaging/arch/pkg/
+packaging/arch/sandesh/
+packaging/arch/*.pkg.tar.*
