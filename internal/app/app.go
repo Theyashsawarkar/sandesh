@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -29,6 +30,10 @@ type App struct {
 	mu      sync.Mutex
 	clients map[string]*google.Client
 	missed  map[string]time.Time // chat users whose name lookup failed
+
+	// ChatAppMissing is set once Chat said the Cloud project has no Chat
+	// app: reading works, read state and sending don't.
+	ChatAppMissing atomic.Bool
 
 	// Progress, when set, hears how a mail sync is going (threads fetched
 	// of total); the setup screen draws its bar from it.

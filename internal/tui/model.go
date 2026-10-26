@@ -88,22 +88,23 @@ type Model struct {
 	showQuoted bool
 	labelNames map[string]string
 
-	mode     mode
-	input    []rune
-	filter   string
-	ai       string
-	aiTitle  string
-	aiBusy   bool
-	toast    string
-	toastAt  time.Time
-	undo     *undo
-	review   *review
-	waiting  []store.OutboxItem
-	syncing  bool
-	synced   time.Time
-	err      string
-	errAt    time.Time
-	lastSync time.Time
+	mode       mode
+	input      []rune
+	filter     string
+	ai         string
+	aiTitle    string
+	aiBusy     bool
+	toast      string
+	toastAt    time.Time
+	undo       *undo
+	review     *review
+	waiting    []store.OutboxItem
+	syncing    bool
+	synced     time.Time
+	err        string
+	errAt      time.Time
+	themeStamp string
+	lastSync   time.Time
 }
 
 func New(a *app.App, launch string) Model {
@@ -314,6 +315,26 @@ func (m *Model) targets() []store.Thread {
 	return out
 }
 
+// recolour picks up a theme change (varna's palette, the config or its
+// include) without a restart.
+func (m *Model) recolour() {
+	stamp := config.ThemeStamp(m.a.Paths, m.a.Config)
+	if stamp == m.themeStamp {
+		return
+	}
+	first := m.themeStamp == ""
+	m.themeStamp = stamp
+	if first {
+		return
+	}
+	if c, err := config.Load(m.a.Paths); err == nil {
+		m.a.Config.Colors = c.Colors
+		m.a.Config.Include = c.Include
+		m.styles = newStyles(c.Colors)
+		m.fixView()
+	}
+}
+
 // setErr shows an error on its own line for a while (Esc clears it).
 func (m *Model) setErr(e string) {
 	m.err, m.errAt = e, time.Now()
@@ -429,6 +450,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				cmds = append(cmds, m.syncCmd())
 			}
+		}
+		if time.Now().Unix()%2 == 0 {
+			m.recolour()
 		}
 		if m.err != "" && time.Since(m.errAt) > 12*time.Second {
 			m.err = ""

@@ -36,31 +36,26 @@ func fit(s string, w int) string {
 	return s + strings.Repeat(" ", max(0, w-lipgloss.Width(s)))
 }
 
-// cardBox draws a rounded card of inner width w around lines. sel fills it
-// with the surface colour and thickens the left edge; dot marks it unread.
+// cardBox draws a card of inner width w around lines: rounded in the
+// border colour, or heavy in the accent when selected. No background
+// fills: they turn muddy on translucent terminals. dot marks it unread.
 func (m Model) cardBox(lines []string, w int, border string, sel, dot bool) []string {
 	s := m.styles
 	b := fg(border)
-	bg := ""
+	tl, tr, bl, br, hz, vt := "╭", "╮", "╰", "╯", "─", "│"
 	if sel {
-		bg = "\x1b[48;2;" + rgb(s.c.Surface) + "m"
+		b = b.Bold(true)
+		tl, tr, bl, br, hz, vt = "┏", "┓", "┗", "┛", "━", "┃"
 	}
-	out := []string{b.Render("╭" + strings.Repeat("─", w+2) + "╮")}
+	out := []string{b.Render(tl + strings.Repeat(hz, w+2) + tr)}
 	for i, l := range lines {
-		left := b.Render("│")
-		if sel {
-			left = fg(s.c.Accent).Bold(true).Render("┃")
-		}
+		left := b.Render(vt)
 		if dot && i == 0 {
-			left = s.accent.Render("●")
+			left = s.accent.Bold(true).Render("●")
 		}
-		body := " " + fit(l, w) + " "
-		if sel {
-			body = bg + strings.ReplaceAll(body, "\x1b[0m", "\x1b[0m"+bg) + "\x1b[0m"
-		}
-		out = append(out, left+body+b.Render("│"))
+		out = append(out, left+" "+fit(l, w)+" "+b.Render(vt))
 	}
-	return append(out, b.Render("╰"+strings.Repeat("─", w+2)+"╯"))
+	return append(out, b.Render(bl+strings.Repeat(hz, w+2)+br))
 }
 
 func rgb(hex string) string {
@@ -82,7 +77,11 @@ func row(left, right string, w int) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
-var avatarColors = []string{"#f5c2e7", "#fab387", "#a6e3a1", "#89b4fa", "#cba6f7", "#94e2d5", "#f9e2af", "#f2cdcd"}
+// avatarColors are the theme's bright colours, picked per name.
+func (s styles) avatarColors() []string {
+	c := s.c
+	return []string{c.Accent2, c.Peach, c.Green, c.Blue, c.Accent, c.Yellow, c.Red}
+}
 
 // avatar is two initials on a colour picked from the name.
 func (m Model) avatar(name string) string {
@@ -97,7 +96,8 @@ func (m Model) avatar(name string) string {
 	for len(ini) < 2 {
 		ini = append(ini, ' ')
 	}
-	return lipgloss.NewStyle().Background(lipgloss.Color(avatarColors[h%len(avatarColors)])).
+	ac := m.styles.avatarColors()
+	return lipgloss.NewStyle().Background(lipgloss.Color(ac[h%len(ac)])).
 		Foreground(lipgloss.Color(m.styles.c.Base)).Bold(true).Render(string(ini))
 }
 
@@ -210,7 +210,7 @@ func (m Model) renderStyles() render.Styles {
 	return render.Styles{
 		Text: s.text, Bold: s.bold, Italic: s.text.Italic(true), Heading: fg(s.c.Accent).Bold(true),
 		Link: fg(s.c.Blue).Underline(true), Quote: s.muted, Muted: s.muted, Button: fg(s.c.Accent).Bold(true),
-		Code: fg(s.c.Peach), TableHead: fg(s.c.Accent).Bold(true), Border: fg(s.c.Surface),
+		Code: fg(s.c.Peach), TableHead: fg(s.c.Accent).Bold(true), Border: fg(s.c.Border),
 	}
 }
 
@@ -445,7 +445,8 @@ func (m *Model) chatLines(w int) []string {
 		if c.Mine {
 			name = "You"
 		}
-		color := avatarColors[hash(name)%len(avatarColors)]
+		ac := s.avatarColors()
+		color := ac[hash(name)%len(ac)]
 		if c.Mine {
 			color = s.c.Green
 		}
@@ -544,6 +545,9 @@ func (m Model) previewBox(w, h int) string {
 			bottom = []string{s.muted.Render(strings.Repeat("─", inner)), s.accent.Render("› ") + s.text.Render(string(m.input)) + s.accent.Render("▏")}
 		} else {
 			bottom = []string{s.muted.Render(strings.Repeat("─", inner)), s.accent.Render("› ") + s.muted.Render("i types a message here · c writes it in your editor · r replies in the thread")}
+			if m.a.ChatAppMissing.Load() {
+				bottom[1] = s.yellow.Render("! ") + s.muted.Render("read and unread stay on this machine until Chat API → Configuration is filled in (sandesh doctor)")
+			}
 		}
 	}
 	avail := h - 2 - len(aiLines) - len(bottom)

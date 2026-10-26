@@ -113,6 +113,13 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("Google API %d: %s", e.Status, e.Message)
 }
 
+// IsChatAppMissing: the Cloud project has no Chat app configured, so Chat
+// refuses the calls that change things (read state, sending).
+func IsChatAppMissing(err error) bool {
+	e, ok := err.(*APIError)
+	return ok && strings.Contains(e.Message, "Chat app not found")
+}
+
 func IsNotFound(err error) bool {
 	e, ok := err.(*APIError)
 	return ok && e.Status == 404

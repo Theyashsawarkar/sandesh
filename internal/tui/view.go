@@ -164,7 +164,7 @@ func (m Model) tabsView() string {
 // box draws a rounded border with a title in it.
 func (m Model) box(w, h int, title, content string, focus bool, color string) string {
 	s := m.styles
-	bc := s.c.Surface
+	bc := s.c.Border
 	if focus {
 		bc = color
 	}

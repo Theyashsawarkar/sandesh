@@ -1,6 +1,8 @@
 package app
 
 import (
+	"github.com/Theyashsawarkar/sandesh/internal/google"
+
 	"context"
 	"encoding/json"
 	"errors"
@@ -76,7 +78,12 @@ func (a *App) MarkSpaceRead(ctx context.Context, account, space string) error {
 	if err != nil {
 		return err
 	}
-	return c.SetReadTime(ctx, space, t)
+	err = c.SetReadTime(ctx, space, t)
+	if google.IsChatAppMissing(err) {
+		a.ChatAppMissing.Store(true)
+		return nil // read here; Chat keeps its own state until it's set up
+	}
+	return err
 }
 
 // ---------------------------------------------------------------- sections

@@ -424,7 +424,9 @@ accent  = "#74c7ec"
 accent2 = "#cba6f7"
 ```
 
-Colour names: `accent`, `accent2`, `text`, `subtle`, `muted`, `surface`, `border`,
+Colours follow [varna](https://github.com/Theyashsawarkar/varna)'s desktop
+theme (`~/.local/state/varna/palette.json`) and change live when it does;
+anything set under `[colors]` wins. Colour names: `accent`, `accent2`, `text`, `subtle`, `muted`, `surface`, `border`,
 `base`, `mantle`, `green`, `yellow`, `red`, `blue`, `peach`. With
 [varna](https://github.com/Theyashsawarkar/varna), point `include` at the
 file it writes and the screen follows your theme.

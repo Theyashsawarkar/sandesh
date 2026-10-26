@@ -85,7 +85,7 @@ func Open(path string) (*Store, error) {
 }
 
 // schemaVersion: bump it with a step in migrate.
-const schemaVersion = 4
+const schemaVersion = 5
 
 func migrate(db *sql.DB) error {
 	var v int
@@ -119,6 +119,15 @@ func migrate(db *sql.DB) error {
 		// v4: when each thread was fetched, so an interrupted first sync
 		// resumes instead of starting over
 		if _, err := db.Exec(`ALTER TABLE threads ADD COLUMN fetched INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	if v < 5 {
+		// v5: messages stored empty (attachments, cards) are fetched again
+		if _, err := db.Exec(`UPDATE spaces SET synced_to=0 WHERE name IN (SELECT DISTINCT space FROM chat_messages WHERE text='(a message with no text)')`); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`DELETE FROM chat_messages WHERE text='(a message with no text)'`); err != nil {
 			return err
 		}
 	}

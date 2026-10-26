@@ -4,6 +4,18 @@ Newest first.
 
 ## Unreleased
 
+- **Follows the desktop theme live**: colours come from varna's
+  `palette.json` (sandesh's own pick under `tools.sandesh` if the theme has
+  one) and change on the running screen when the theme changes; `[colors]`
+  in the config still win. `SANDESH_NO_VARNA=1` turns it off.
+- **Cleaner borders**: panels and frames use the `border` colour instead of
+  one almost the same as the background; the selected card is a heavy
+  accent frame instead of a background fill, which looked muddy on
+  translucent terminals.
+- **No red error when Chat has no app configured**: marking a space read
+  works on this machine, and a quiet line says what to set up; messages that
+  were cached empty are fetched again.
+
 - **Syncs in the background, not when you open it**: the screen shows the
   local copy at once and leaves syncing to the background service (setup
   now installs it); it syncs by itself only when the service isn't

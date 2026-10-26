@@ -139,10 +139,13 @@ func Default() Config {
 // Load reads the config file over the defaults. A missing file is fine.
 func Load(p Paths) (Config, error) {
 	c := Default()
+	applyVarna(&c.Colors) // the desktop theme; the file's [colors] win
 	sections := c.Sections
 	c.Sections = nil
 	if _, err := toml.DecodeFile(p.ConfigFile(), &c); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return Default(), fmt.Errorf("%s: %w", p.ConfigFile(), err)
+		d := Default()
+		applyVarna(&d.Colors)
+		return d, fmt.Errorf("%s: %w", p.ConfigFile(), err)
 	}
 	if len(c.Sections) == 0 {
 		c.Sections = sections
@@ -219,8 +222,12 @@ notify        = true   # desktop notification for new mail and DMs
 ai_command    = ["claude", "-p"]   # what @, S, D and T run
 # editor      = "nvim"             # default: $VISUAL, $EDITOR, vi
 
-# Theme file read after this one; its [colors] win (varna writes it).
-# include = "~/.local/state/varna/sandesh.toml"
+# Colours follow varna's desktop theme (~/.local/state/varna/palette.json)
+# and change live with it. Set any of them here to override, or include a
+# theme file read after this one (its [colors] win).
+# [colors]
+# accent = "#74c7ec"
+# include = "~/.config/sandesh/theme.toml"
 
 # Sections are the tabs on top. label is a Gmail label id, query a Gmail
 # search run on the server, today keeps only threads with mail from today.
