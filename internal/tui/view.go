@@ -39,6 +39,9 @@ func (m Model) bodyHeight() int {
 	if len(m.waiting) > 0 && m.mode != modeApprove {
 		h--
 	}
+	if m.err != "" {
+		h--
+	}
 	if m.inputMode() {
 		h--
 	}
@@ -79,6 +82,10 @@ func (m Model) View() string {
 	rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, left, right))
 	if len(m.waiting) > 0 && m.mode != modeApprove {
 		rows = append(rows, m.styles.banner.Render(fmt.Sprintf("󰀦 %d send(s) from an agent wait for your approval · press A", len(m.waiting))))
+	}
+	if m.err != "" {
+		e := m.styles.red.Render("● " + m.err)
+		rows = append(rows, " "+ansi.Truncate(e, m.w-14, "…")+m.styles.muted.Render("  esc hides"))
 	}
 	if m.inputMode() {
 		rows = append(rows, m.inputView())
@@ -381,10 +388,7 @@ func (m Model) footerView() string {
 		left += " " + s.keycap.Render(k[0]) + s.muted.Render(" "+k[1])
 	}
 	right := ""
-	switch {
-	case m.err != "":
-		right = s.red.Render(m.err)
-	case m.toast != "":
+	if m.toast != "" {
 		right = s.green.Render(m.toast)
 	}
 	rw := lipgloss.Width(right)

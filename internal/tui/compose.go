@@ -269,7 +269,7 @@ func (m *Model) labelCmd() tea.Cmd {
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		pick := strings.TrimSpace(out.String())
 		if err != nil || pick == "" {
-			return doneMsg{"", nil}
+			return doneMsg{}
 		}
 		_, id, _ := strings.Cut(pick, "\t")
 		on := !strings.HasPrefix(pick, "✓")
@@ -283,10 +283,10 @@ func (m *Model) labelCmd() tea.Cmd {
 				err = a.Modify(ctx, t.Account, t.ID, nil, []string{id})
 			}
 			if err != nil {
-				return doneMsg{"", err}
+				return doneMsg{err: err}
 			}
 		}
-		return doneMsg{map[bool]string{true: "label added", false: "label removed"}[on], nil}
+		return doneMsg{msg: map[bool]string{true: "label added", false: "label removed"}[on]}
 	})
 }
 

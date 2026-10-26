@@ -74,6 +74,7 @@ type Colors struct {
 	Subtle  string `toml:"subtle"`
 	Muted   string `toml:"muted"`
 	Surface string `toml:"surface"`
+	Border  string `toml:"border"`
 	Base    string `toml:"base"`
 	Mantle  string `toml:"mantle"`
 	Green   string `toml:"green"`
@@ -117,7 +118,7 @@ func Default() Config {
 		MailInterval: duration{60 * time.Second},
 		ChatInterval: duration{30 * time.Second},
 		InitialDays:  30,
-		MaxThreads:   500,
+		MaxThreads:   150,
 		Notify:       true,
 		AICommand:    []string{"claude", "-p"},
 		Sections: []Section{
@@ -129,7 +130,7 @@ func Default() Config {
 		// Catppuccin Mocha, the fallback when no theme is included.
 		Colors: Colors{
 			Accent: "#74c7ec", Accent2: "#cba6f7", Text: "#cdd6f4", Subtle: "#a6adc8", Muted: "#7f849c",
-			Surface: "#313244", Base: "#1e1e2e", Mantle: "#181825", Green: "#a6e3a1", Yellow: "#f9e2af",
+			Surface: "#313244", Border: "#585b70", Base: "#1e1e2e", Mantle: "#181825", Green: "#a6e3a1", Yellow: "#f9e2af",
 			Red: "#f38ba8", Blue: "#89b4fa", Peach: "#fab387",
 		},
 	}
@@ -181,6 +182,7 @@ func mergeColors(dst *Colors, src Colors) {
 	set(&dst.Subtle, src.Subtle)
 	set(&dst.Muted, src.Muted)
 	set(&dst.Surface, src.Surface)
+	set(&dst.Border, src.Border)
 	set(&dst.Base, src.Base)
 	set(&dst.Mantle, src.Mantle)
 	set(&dst.Green, src.Green)
@@ -212,7 +214,7 @@ undo_seconds  = 10     # every send waits this long; z (or Ctrl+c) cancels
 mail_interval = "60s"  # how often the background sync checks Gmail
 chat_interval = "30s"  # and Google Chat
 initial_days  = 30     # how far back the first sync goes
-max_threads   = 500    # at most this many threads on the first sync
+max_threads   = 150    # at most this many threads on the first sync (older mail: search)
 notify        = true   # desktop notification for new mail and DMs
 ai_command    = ["claude", "-p"]   # what @, S, D and T run
 # editor      = "nvim"             # default: $VISUAL, $EDITOR, vi

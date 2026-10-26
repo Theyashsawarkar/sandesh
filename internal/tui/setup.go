@@ -265,10 +265,20 @@ func (s setup) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m := New(s.a, s.launch)
 		m.w, m.h = s.w, s.h
 		if msg.err != nil {
-			m.err = "first sync: " + msg.err.Error()
+			m.setErr("first sync: " + msg.err.Error())
 		}
 		m.fixView()
-		return m, m.Init()
+		cmds := []tea.Cmd{m.Init()}
+		if !app.ServiceInstalled() && google.FakeURL() == "" {
+			// keep the copy fresh from now on, with or without this screen
+			cmds = append(cmds, func() tea.Msg {
+				if err := app.InstallService(); err != nil {
+					return doneMsg{err: fmt.Errorf("background sync: %w (sandesh service install retries)", err)}
+				}
+				return doneMsg{msg: "background sync started"}
+			})
+		}
+		return m, tea.Batch(cmds...)
 	case tea.KeyMsg:
 		return s.key(msg)
 	}

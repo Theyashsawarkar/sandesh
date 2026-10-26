@@ -816,8 +816,13 @@ func FindSpace(a *app.App, key string) (store.Space, error) {
 }
 
 func SpaceTitle(s store.Space) string {
-	if s.DisplayName != "" {
+	switch {
+	case s.DisplayName != "":
 		return s.DisplayName
+	case s.Type == "DIRECT_MESSAGE":
+		return "Direct message"
+	case s.Type == "GROUP_CHAT":
+		return "Group chat"
 	}
 	return s.Name
 }

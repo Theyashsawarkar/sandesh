@@ -85,7 +85,7 @@ func Open(path string) (*Store, error) {
 }
 
 // schemaVersion: bump it with a step in migrate.
-const schemaVersion = 2
+const schemaVersion = 4
 
 func migrate(db *sql.DB) error {
 	var v int
@@ -99,6 +99,26 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 		if _, err := db.Exec(`UPDATE accounts SET history_id=''`); err != nil {
+			return err
+		}
+	}
+	if v < 3 {
+		// v3 stops keeping "user 1234" placeholders as names: forget them
+		// (and the DM titles built from them) so they are looked up again
+		if _, err := db.Exec(`DELETE FROM users WHERE name LIKE 'user %' OR name=''`); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`UPDATE spaces SET display_name='' WHERE type<>'SPACE' AND display_name LIKE '%user %'`); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`UPDATE chat_messages SET text='(a message with no text)' WHERE text=''`); err != nil {
+			return err
+		}
+	}
+	if v < 4 {
+		// v4: when each thread was fetched, so an interrupted first sync
+		// resumes instead of starting over
+		if _, err := db.Exec(`ALTER TABLE threads ADD COLUMN fetched INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err
 		}
 	}
@@ -259,8 +279,8 @@ func (s *Store) PutThread(account string, t Thread, msgs []Message) error {
 	if err := deleteThreadTx(tx, account, t.ID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO threads(account,id,subject,snippet,last_date,labels,participants,last_from,msg_count) VALUES(?,?,?,?,?,?,?,?,?)`,
-		account, t.ID, t.Subject, t.Snippet, t.LastDate, joinLabels(t.Labels), t.Participants, t.LastFrom, len(msgs)); err != nil {
+	if _, err := tx.Exec(`INSERT INTO threads(account,id,subject,snippet,last_date,labels,participants,last_from,msg_count,fetched) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		account, t.ID, t.Subject, t.Snippet, t.LastDate, joinLabels(t.Labels), t.Participants, t.LastFrom, len(msgs), now()); err != nil {
 		return err
 	}
 	for _, m := range msgs {
@@ -488,6 +508,13 @@ func (s *Store) SetSectionThreads(account, section string, ids []string) error {
 	return tx.Commit()
 }
 
+// FetchedSince reports whether the thread was fetched after `since` (ms).
+func (s *Store) FetchedSince(account, id string, since int64) bool {
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM threads WHERE account=? AND id=? AND fetched>?`, account, id, since).Scan(&n)
+	return n > 0
+}
+
 // HasThread reports whether the thread is cached with this many messages.
 func (s *Store) HasThread(account, id string) bool {
 	var n int
@@ -628,6 +655,18 @@ func (s *Store) PutSpace(sp Space) error {
 	_, err := s.db.Exec(`INSERT INTO spaces(account,name,display_name,type,last_active) VALUES(?,?,?,?,?)
 	  ON CONFLICT(account,name) DO UPDATE SET display_name=CASE WHEN excluded.display_name<>'' THEN excluded.display_name ELSE display_name END,
 	  type=excluded.type, last_active=MAX(last_active,excluded.last_active)`, sp.Account, sp.Name, sp.DisplayName, sp.Type, sp.LastActive)
+	return err
+}
+
+// ResetDMTitles forgets DM and group titles so they are worked out again.
+func (s *Store) ResetDMTitles(account string) error {
+	_, err := s.db.Exec(`UPDATE spaces SET display_name='' WHERE account=? AND type<>'SPACE'`, account)
+	return err
+}
+
+// RenameSpace sets a DM or group's title (they have none of their own).
+func (s *Store) RenameSpace(account, space, name string) error {
+	_, err := s.db.Exec(`UPDATE spaces SET display_name=? WHERE account=? AND name=?`, name, account, space)
 	return err
 }
 

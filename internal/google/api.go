@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Theyashsawarkar/sandesh/internal/mime"
@@ -20,13 +22,65 @@ type Client struct {
 	gmail string
 	chat  string
 	ppl   string
+	quota *bucket
+}
+
+// Gmail allows 15,000 "quota units" a minute per user (threads.get is 10,
+// history.list 2, send 100). sandesh spends at most 40 a second (2,400 a
+// minute) with a burst of 200, far under it even with several processes.
+type bucket struct {
+	mu     sync.Mutex
+	tokens float64
+	last   time.Time
+}
+
+const (
+	unitsPerSecond = 40
+	unitsBurst     = 200
+)
+
+func (b *bucket) take(ctx context.Context, n float64) error {
+	for {
+		b.mu.Lock()
+		now := time.Now()
+		if b.last.IsZero() {
+			b.tokens, b.last = unitsBurst, now
+		}
+		b.tokens = min(unitsBurst, b.tokens+now.Sub(b.last).Seconds()*unitsPerSecond)
+		b.last = now
+		if b.tokens >= n {
+			b.tokens -= n
+			b.mu.Unlock()
+			return nil
+		}
+		wait := time.Duration((n - b.tokens) / unitsPerSecond * float64(time.Second))
+		b.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+}
+
+// gmailCost is Gmail's quota cost of a call (from its usage limits page).
+func gmailCost(method, u string) float64 {
+	switch {
+	case strings.Contains(u, "/messages/send") || strings.Contains(u, "/drafts/send"):
+		return 100
+	case strings.Contains(u, "/history"):
+		return 2
+	case strings.Contains(u, "/profile") || strings.Contains(u, "/labels"):
+		return 1
+	}
+	return 10
 }
 
 func NewClient(h *http.Client) *Client {
 	if f := strings.TrimRight(FakeURL(), "/"); f != "" {
-		return &Client{HTTP: h, gmail: f + "/gmail/v1", chat: f + "/chat/v1", ppl: f + "/people/v1"}
+		return &Client{HTTP: h, gmail: f + "/gmail/v1", chat: f + "/chat/v1", ppl: f + "/people/v1", quota: &bucket{}}
 	}
-	return &Client{HTTP: h, gmail: "https://gmail.googleapis.com/gmail/v1", chat: "https://chat.googleapis.com/v1", ppl: "https://people.googleapis.com/v1"}
+	return &Client{HTTP: h, gmail: "https://gmail.googleapis.com/gmail/v1", chat: "https://chat.googleapis.com/v1", ppl: "https://people.googleapis.com/v1", quota: &bucket{}}
 }
 
 // APIError is a non-2xx answer.
@@ -36,6 +90,20 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
+	switch {
+	case strings.Contains(e.Message, "Chat app not found"):
+		return "Google Chat isn't set up in your Cloud project: open Google Chat API → Configuration, fill in an app name, avatar URL and description, save, and wait a few minutes"
+	case strings.Contains(e.Message, "Quota exceeded") || strings.Contains(e.Message, "ateLimitExceeded"):
+		return "Google is rate-limiting sandesh for a minute; it slows down and retries by itself"
+	case strings.Contains(e.Message, "has not been used in project") || strings.Contains(e.Message, "is disabled"):
+		api := "an API"
+		for _, n := range []string{"Gmail API", "People API", "Google Chat API"} {
+			if strings.Contains(e.Message, n) {
+				api = "the " + n
+			}
+		}
+		return "Enable " + api + " in your Cloud project (APIs & Services → Library), then wait a few minutes"
+	}
 	switch e.Status {
 	case 401:
 		return "Google refused the sign-in (" + e.Message + "); run sandesh auth add again"
@@ -59,6 +127,11 @@ func (c *Client) do(ctx context.Context, method, u string, body, out any) error 
 		}
 		rd = bytes.NewReader(b)
 	}
+	if strings.HasPrefix(u, c.gmail) && c.quota != nil {
+		if err := c.quota.take(ctx, gmailCost(method, u)); err != nil {
+			return err
+		}
+	}
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, u, rd)
 		if err != nil {
@@ -73,11 +146,18 @@ func (c *Client) do(ctx context.Context, method, u string, body, out any) error 
 		}
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 		resp.Body.Close()
-		if (resp.StatusCode == 429 || resp.StatusCode >= 500) && attempt < 3 {
+		limited := resp.StatusCode == 429 || resp.StatusCode == 403 && bytes.Contains(data, []byte("ateLimitExceeded")) ||
+			resp.StatusCode == 403 && bytes.Contains(data, []byte("Quota exceeded"))
+		if (limited || resp.StatusCode >= 500) && attempt < 5 {
+			// back off: 2, 4, 8, 16, 32 s, or what Google asks for
+			wait := time.Duration(2<<attempt) * time.Second
+			if ra, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && ra > 0 {
+				wait = time.Duration(ra) * time.Second
+			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(time.Duration(1<<attempt) * time.Second):
+			case <-time.After(wait):
 			}
 			if body != nil {
 				b, _ := json.Marshal(body)
@@ -328,6 +408,29 @@ type ChatMsg struct {
 	Thread struct {
 		Name string `json:"name"`
 	} `json:"thread"`
+	Attachment []struct {
+		ContentName string `json:"contentName"`
+		ContentType string `json:"contentType"`
+	} `json:"attachment"`
+	CardsV2 []json.RawMessage `json:"cardsV2"`
+}
+
+// Display is the message's text, or what it holds when it has none.
+func (m ChatMsg) Display() string {
+	t := m.Text
+	for _, a := range m.Attachment {
+		if t != "" {
+			t += "\n"
+		}
+		t += "📎 " + a.ContentName
+	}
+	if t == "" && len(m.CardsV2) > 0 {
+		t = "▤ a card (open it in Chat with b)"
+	}
+	if t == "" {
+		t = "(a message with no text)"
+	}
+	return t
 }
 
 // Messages lists a space's messages created after `after` (zero: the

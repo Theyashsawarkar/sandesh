@@ -402,7 +402,7 @@ undo_seconds  = 10          # every send waits this long; z cancels
 mail_interval = "60s"       # how often the background sync checks Gmail
 chat_interval = "30s"       # and Google Chat
 initial_days  = 30          # how far back the first sync goes
-max_threads   = 500         # at most this many threads on the first sync
+max_threads   = 150         # at most this many threads on the first sync (older mail: search)
 notify        = true        # desktop notifications for new mail and DMs
 ai_command    = ["claude", "-p"]   # what @, S, D and T run
 # editor      = "nvim"             # default: $VISUAL, $EDITOR, vi
@@ -424,7 +424,7 @@ accent  = "#74c7ec"
 accent2 = "#cba6f7"
 ```
 
-Colour names: `accent`, `accent2`, `text`, `subtle`, `muted`, `surface`,
+Colour names: `accent`, `accent2`, `text`, `subtle`, `muted`, `surface`, `border`,
 `base`, `mantle`, `green`, `yellow`, `red`, `blue`, `peach`. With
 [varna](https://github.com/Theyashsawarkar/varna), point `include` at the
 file it writes and the screen follows your theme.
@@ -451,8 +451,10 @@ file it writes and the screen follows your theme.
   unit) follows Gmail's change feed (`history.list`) every minute and
   checks Google Chat spaces with new activity every 30 seconds, storing
   everything in SQLite with full-text search. The screen, the CLI and the
-  MCP server read that copy, so they open instantly. Each of them can also
-  sync on its own when the daemon isn't running.
+  MCP server read that copy, so they open instantly; the screen syncs on
+  its own only when the daemon isn't running, and right after you change
+  something. A lock lets only one process sync an account at a time, and
+  Gmail requests are paced well under Google's per-minute limit.
 - **One send path.** Every send, from you or an agent, becomes an outbox
   row: `approval` (an agent's, waiting for you) → `queued` (the undo
   window) → claimed by whichever process gets there first → `sent` or

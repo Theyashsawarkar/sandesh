@@ -102,6 +102,7 @@ type Model struct {
 	syncing  bool
 	synced   time.Time
 	err      string
+	errAt    time.Time
 	lastSync time.Time
 }
 
@@ -313,6 +314,11 @@ func (m *Model) targets() []store.Thread {
 	return out
 }
 
+// setErr shows an error on its own line for a while (Esc clears it).
+func (m *Model) setErr(e string) {
+	m.err, m.errAt = e, time.Now()
+}
+
 func (m *Model) say(s string) {
 	m.toast = s
 	m.toastAt = time.Now()
@@ -323,8 +329,9 @@ func (m *Model) say(s string) {
 type tickMsg time.Time
 type syncedMsg struct{ errs map[string]error }
 type doneMsg struct {
-	msg string
-	err error
+	msg  string
+	err  error
+	sync bool // sync soon after (a send went out)
 }
 type aiMsg struct {
 	title, text string
@@ -345,8 +352,23 @@ type searchMsg struct {
 
 func tick() tea.Cmd { return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }) }
 
+// Init shows the local copy at once. The background service keeps it
+// fresh; only when it isn't running does the screen sync by itself.
 func (m Model) Init() tea.Cmd {
+	if m.a.DaemonRunning() {
+		return tick()
+	}
 	return tea.Batch(tick(), m.syncCmd())
+}
+
+type syncSoonMsg struct{}
+
+// syncSoon asks for a quick sync shortly after a change (a send, an
+// archive...), so the copy shows what Google now has. Gmail's change feed
+// makes it cheap; the per-account lock keeps it from doubling the
+// daemon's work.
+func (m *Model) syncSoon() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return syncSoonMsg{} })
 }
 
 func (m *Model) syncCmd() tea.Cmd {
@@ -367,7 +389,7 @@ func (m *Model) act(okMsg string, f func(ctx context.Context) error) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		return doneMsg{okMsg, f(ctx)}
+		return doneMsg{msg: okMsg, err: f(ctx)}
 	}
 }
 
@@ -388,9 +410,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			defer cancel()
 			for _, it := range a.DeliverDue(ctx) {
 				if it.Status == store.StatusFailed {
-					return doneMsg{"", fmt.Errorf("send #%d failed: %s", it.ID, it.Error)}
+					return doneMsg{err: fmt.Errorf("send #%d failed: %s", it.ID, it.Error)}
 				}
-				return doneMsg{"sent", nil}
+				return doneMsg{msg: "sent", sync: true}
 			}
 			return nil
 		})
@@ -402,27 +424,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reload()
 		}
 		if !m.syncing && time.Since(m.lastSync) > m.a.Config.MailInterval.Duration {
-			cmds = append(cmds, m.syncCmd())
+			if m.a.DaemonRunning() {
+				m.lastSync = time.Now() // the background service has it
+			} else {
+				cmds = append(cmds, m.syncCmd())
+			}
+		}
+		if m.err != "" && time.Since(m.errAt) > 12*time.Second {
+			m.err = ""
 		}
 		return m, tea.Batch(cmds...)
+	case syncSoonMsg:
+		return m, m.syncCmd()
 	case syncedMsg:
 		m.syncing = false
 		m.lastSync = time.Now()
-		m.err = ""
 		for acc, err := range msg.errs {
-			m.err = acc + ": " + err.Error()
+			m.setErr(acc + ": " + err.Error())
 		}
 		m.accounts = m.a.AccountNames()
 		m.reload()
 		return m, nil
 	case doneMsg:
 		if msg.err != nil {
-			m.err = msg.err.Error()
-			m.say("")
+			m.setErr(msg.err.Error())
 		} else if msg.msg != "" {
 			m.say(msg.msg)
 		}
 		m.reload()
+		if msg.err == nil && (msg.sync || msg.msg != "") {
+			return m, m.syncSoon()
+		}
 		return m, nil
 	case searchMsg:
 		if msg.err != nil {
@@ -593,6 +625,8 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		switch {
 		case m.focus == 1:
 			m.focus = 0
+		case m.err != "":
+			m.err = ""
 		case m.ai != "" || m.aiBusy:
 			m.ai, m.aiBusy = "", false
 		case len(m.selected) > 0:

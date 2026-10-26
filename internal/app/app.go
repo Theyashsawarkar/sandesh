@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Theyashsawarkar/sandesh/internal/config"
@@ -27,6 +28,7 @@ type App struct {
 
 	mu      sync.Mutex
 	clients map[string]*google.Client
+	missed  map[string]time.Time // chat users whose name lookup failed
 
 	// Progress, when set, hears how a mail sync is going (threads fetched
 	// of total); the setup screen draws its bar from it.
@@ -111,6 +113,34 @@ func (a *App) LogAgent(format string, args ...any) {
 	defer f.Close()
 	fmt.Fprintf(f, "%s %s\n", time.Now().Format(time.RFC3339), fmt.Sprintf(format, args...))
 }
+
+// lock takes a cross-process lock (a file under state/), so two sandesh
+// processes never sync the same account at once. ok is false when another
+// one holds it.
+func (a *App) lock(name string) (unlock func(), ok bool) {
+	f, err := os.OpenFile(filepath.Join(a.Paths.State, name+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return func() {}, true
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, false
+	}
+	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() }, true
+}
+
+// DaemonRunning reports whether the background sync is running (it holds
+// state/daemon.lock while it lives).
+func (a *App) DaemonRunning() bool {
+	unlock, ok := a.lock("daemon")
+	if ok {
+		unlock()
+	}
+	return !ok
+}
+
+// HoldDaemonLock is taken by `sandesh daemon` for its whole life.
+func (a *App) HoldDaemonLock() (func(), bool) { return a.lock("daemon") }
 
 // Executable is the path to this binary, for popups and units.
 func Executable() string {

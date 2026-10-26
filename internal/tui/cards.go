@@ -86,15 +86,9 @@ var avatarColors = []string{"#f5c2e7", "#fab387", "#a6e3a1", "#89b4fa", "#cba6f7
 
 // avatar is two initials on a colour picked from the name.
 func (m Model) avatar(name string) string {
-	h := 0
-	for _, r := range name {
-		h = h*31 + int(r)
-	}
-	if h < 0 {
-		h = -h
-	}
+	h := hash(name)
 	var ini []rune
-	for _, w := range strings.FieldsFunc(name, func(r rune) bool { return r == ' ' || r == '.' || r == '@' || r == '_' }) {
+	for _, w := range strings.FieldsFunc(name, func(r rune) bool { return r == ' ' || r == '.' || r == '@' || r == '_' || r == ',' || r == '+' }) {
 		ini = append(ini, []rune(strings.ToUpper(w))[0])
 		if len(ini) == 2 {
 			break
@@ -129,7 +123,7 @@ func (m *Model) listView(w, h int) string {
 	visible := max(1, (h-1)/m.cardRows())
 	for i := m.offset; i < min(m.count(), m.offset+visible); i++ {
 		sel := i == m.sel
-		border := s.c.Surface
+		border := s.c.Border
 		if sel && m.focus == 0 {
 			border = s.c.Accent
 		} else if sel {
@@ -284,7 +278,7 @@ func (m *Model) mailLines(t store.Thread, w int) []string {
 		}
 		date := time.UnixMilli(msg.Date).Format("Mon 02 Jan, 15:04")
 		head := row(m.avatar(from)+" "+s.bold.Render(from)+s.muted.Render(" <"+msg.FromAddr+">"), s.muted.Render(date), inner)
-		border := s.c.Surface
+		border := s.c.Border
 		if !open {
 			lines := []string{head, "   " + ansi.Truncate(s.muted.Render(oneLine(msg.Body)), inner-3, "…")}
 			out = append(out, m.cardBox(lines, inner, border, false, false)...)
@@ -409,12 +403,14 @@ func wrap(text string, w int) []string {
 
 var reMention = regexp.MustCompile(`@[\p{L}\p{N}_.-]+`)
 
+// chatLines draws a conversation: a day line, then groups of messages by
+// sender (name and time once, then each message behind a coloured bar);
+// yours sit on the right with a green bar.
 func (m *Model) chatLines(w int) []string {
 	s := m.styles
 	if len(m.chatMsgs) == 0 {
 		return []string{s.muted.Render("No recent messages synced.")}
 	}
-	// replies per thread
 	threadCount := map[string]int{}
 	first := map[string]string{}
 	for _, c := range m.chatMsgs {
@@ -426,7 +422,7 @@ func (m *Model) chatLines(w int) []string {
 	mention := lipgloss.NewStyle().Background(lipgloss.Color(s.c.Accent)).Foreground(lipgloss.Color(s.c.Base))
 	var out []string
 	var lastDay string
-	bw := w * 3 / 4
+	bw := max(20, w*4/5)
 	for i := 0; i < len(m.chatMsgs); {
 		c := m.chatMsgs[i]
 		t := time.UnixMilli(c.Created)
@@ -434,11 +430,14 @@ func (m *Model) chatLines(w int) []string {
 			lastDay = day
 			label := " " + day + " "
 			side := max(2, (w-lipgloss.Width(label))/2)
-			out = append(out, s.muted.Render(strings.Repeat("─", side)+label+strings.Repeat("─", max(0, w-side-lipgloss.Width(label)))), "")
+			if len(out) > 0 {
+				out = append(out, "")
+			}
+			out = append(out, s.muted.Render(strings.Repeat("─", side)+label+strings.Repeat("─", max(0, w-side-lipgloss.Width(label)))))
 		}
-		// a group: same sender, same day, within 5 minutes of each other
+		// a group: same sender, same day, each within 10 minutes of the last
 		j := i + 1
-		for j < len(m.chatMsgs) && m.chatMsgs[j].Sender == c.Sender && m.chatMsgs[j].Created-m.chatMsgs[j-1].Created < 5*60*1000 &&
+		for j < len(m.chatMsgs) && m.chatMsgs[j].Sender == c.Sender && m.chatMsgs[j].Created-m.chatMsgs[j-1].Created < 10*60*1000 &&
 			dayName(time.UnixMilli(m.chatMsgs[j].Created)) == lastDay {
 			j++
 		}
@@ -446,43 +445,53 @@ func (m *Model) chatLines(w int) []string {
 		if c.Mine {
 			name = "You"
 		}
-		var body []string
-		for _, g := range m.chatMsgs[i:j] {
-			for _, l := range wrap(mime.Clean(g.Text), bw-4) {
-				body = append(body, styleMentions(l, s.text, mention))
-			}
-			if first[g.Thread] != g.Name {
-				body[len(body)-1] = s.muted.Render("↳ ") + body[len(body)-1]
-			} else if n := threadCount[g.Thread]; n > 1 {
-				body = append(body, s.muted.Render(fmt.Sprintf("↳ %d replies in this thread", n-1)))
-			}
-		}
-		width := 0
-		for _, l := range body {
-			width = max(width, lipgloss.Width(l))
-		}
-		border := s.c.Surface
-		nameSt := fg(s.c.Blue).Bold(true)
+		color := avatarColors[hash(name)%len(avatarColors)]
 		if c.Mine {
-			border, nameSt = s.c.Green, fg(s.c.Green).Bold(true)
+			color = s.c.Green
 		}
-		head := m.avatar(name) + " " + nameSt.Render(name) + " " + s.muted.Render(t.Format("15:04"))
-		box := m.cardBox(body, width, border, false, false)
+		bar := fg(color).Render("▎")
+		out = append(out, "")
+		head := m.avatar(name) + " " + fg(color).Bold(true).Render(name) + " " + s.muted.Render(t.Format("15:04"))
 		if c.Mine {
+			head = s.muted.Render(t.Format("15:04")) + " " + fg(color).Bold(true).Render(name) + " " + m.avatar(name)
 			out = append(out, padLeft(head, w))
-			for _, l := range box {
-				out = append(out, padLeft(l, w))
-			}
 		} else {
 			out = append(out, head)
-			for _, l := range box {
-				out = append(out, "   "+l)
+		}
+		for _, g := range m.chatMsgs[i:j] {
+			var lines []string
+			if first[g.Thread] != g.Name {
+				lines = append(lines, s.muted.Render("↳ reply in a thread"))
+			}
+			for _, l := range wrap(mime.Clean(g.Text), bw-3) {
+				lines = append(lines, styleMentions(l, s.text, mention))
+			}
+			if first[g.Thread] == g.Name && threadCount[g.Thread] > 1 {
+				lines = append(lines, s.muted.Render(fmt.Sprintf("↳ %d %s in this thread", threadCount[g.Thread]-1,
+					map[bool]string{true: "reply", false: "replies"}[threadCount[g.Thread] == 2])))
+			}
+			for _, l := range lines {
+				if c.Mine {
+					out = append(out, padLeft(l+" "+bar, w))
+				} else {
+					out = append(out, "   "+bar+" "+l)
+				}
 			}
 		}
-		out = append(out, "")
 		i = j
 	}
 	return out
+}
+
+func hash(s string) int {
+	h := 0
+	for _, r := range s {
+		h = h*31 + int(r)
+	}
+	if h < 0 {
+		h = -h
+	}
+	return h
 }
 
 // styleMentions colours @names in a plain line.

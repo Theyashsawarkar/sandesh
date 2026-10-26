@@ -36,6 +36,11 @@ func (a *App) SyncMail(ctx context.Context, account string) ([]News, error) {
 	if err != nil {
 		return nil, err
 	}
+	unlock, ok := a.lock("mail-" + account)
+	if !ok {
+		return nil, nil // another sandesh is syncing this account right now
+	}
+	defer unlock()
 	news, err := a.syncMail(ctx, c, acc)
 	if err != nil {
 		_ = a.Store.SetError(account, err.Error())
@@ -70,7 +75,16 @@ func (a *App) syncMail(ctx context.Context, c *google.Client, acc store.Account)
 		if err != nil {
 			return nil, err
 		}
-		touched, historyID = ids, hid
+		// a first sync cut short (rate limit, network) resumes: threads
+		// fetched in the last day are kept, not fetched again
+		cutoff := time.Now().Add(-24 * time.Hour).UnixMilli()
+		touched = touched[:0]
+		for _, id := range ids {
+			if !a.Store.FetchedSince(acc.Name, id, cutoff) {
+				touched = append(touched, id)
+			}
+		}
+		historyID = hid
 		if labels, err := c.Labels(ctx); err == nil {
 			var ls []store.Label
 			for _, l := range labels {
@@ -298,6 +312,11 @@ func (a *App) SyncChat(ctx context.Context, account string) ([]News, error) {
 	if err != nil {
 		return nil, err
 	}
+	unlock, ok := a.lock("chat-" + account)
+	if !ok {
+		return nil, nil
+	}
+	defer unlock()
 	news, err := a.syncChat(ctx, c, acc)
 	if err != nil {
 		_ = a.Store.SetError(account, "chat: "+err.Error())
@@ -325,6 +344,17 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 	if err != nil {
 		return nil, err
 	}
+	if me == "" {
+		// without the People API: you are the one member every DM has
+		if id := a.findMe(ctx, c, spaces); id != "" {
+			me = id
+			_ = a.Store.SetChatSynced(acc.Name, me)
+			_ = a.Store.ResetDMTitles(acc.Name) // they were built with you in them
+			if n, _, ok := a.Store.User(acc.Name, me); ok {
+				myName = n
+			}
+		}
+	}
 	firstRun := acc.ChatSynced == 0
 	cutoff := time.Now().AddDate(0, 0, -a.Config.InitialDays)
 	var news []News
@@ -336,8 +366,23 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 		cached, cerr := a.Store.Space(acc.Name, gs.Name)
 		known := cerr == nil
 		sp := store.Space{Account: acc.Name, Name: gs.Name, DisplayName: mime.Clean(gs.DisplayName), Type: gs.SpaceType, LastActive: active.UnixMilli()}
-		if sp.DisplayName == "" && (!known || cached.DisplayName == "") {
-			sp.DisplayName = a.dmName(ctx, c, acc.Name, gs.Name, me)
+		if sp.DisplayName == "" && (!known || cached.DisplayName == "" || strings.Contains(cached.DisplayName, "user ")) {
+			name := a.dmName(ctx, c, acc.Name, gs.Name, me)
+			if name == "" && gs.SpaceType == "DIRECT_MESSAGE" && me != "" {
+				// an old DM: its latest messages name the other person
+				if msgs, err := c.Messages(ctx, gs.Name, time.Time{}, 10); err == nil {
+					for _, m := range msgs {
+						if m.Sender.Name != me && m.Sender.DisplayName != "" {
+							name = mime.Clean(m.Sender.DisplayName)
+							_ = a.Store.PutUser(acc.Name, m.Sender.Name, name, "")
+						}
+					}
+				}
+			}
+			if name != "" {
+				sp.DisplayName = name
+				_ = a.Store.RenameSpace(acc.Name, gs.Name, name)
+			}
 		}
 		if err := a.Store.PutSpace(sp); err != nil {
 			return nil, err
@@ -360,12 +405,17 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 		var newest int64
 		for _, m := range msgs {
 			created := google.ParseTime(m.CreateTime).UnixMilli()
-			name := m.Sender.DisplayName
-			if name == "" {
+			name := mime.Clean(m.Sender.DisplayName)
+			if name != "" {
+				// Chat names its senders: remember them for DM titles too
+				if known, _, ok := a.Store.User(acc.Name, m.Sender.Name); !ok || known != name {
+					_ = a.Store.PutUser(acc.Name, m.Sender.Name, name, "")
+				}
+			} else {
 				name = a.userName(ctx, c, acc.Name, m.Sender.Name)
 			}
 			cm := store.ChatMessage{Account: acc.Name, Name: m.Name, Space: gs.Name, Thread: m.Thread.Name, Sender: m.Sender.Name,
-				SenderName: mime.Clean(name), Text: mime.Clean(m.Text), Created: created}
+				SenderName: name, Text: mime.Clean(m.Display()), Created: created}
 			out = append(out, cm)
 			if created > newest {
 				newest = created
@@ -395,22 +445,71 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 	return news, a.Store.SetChatSynced(acc.Name, me)
 }
 
+// findMe intersects the members of a few DMs: the one user in all of them
+// is the account's own chat user.
+func (a *App) findMe(ctx context.Context, c *google.Client, spaces []google.ChatSpace) string {
+	var common map[string]bool
+	n := 0
+	for _, sp := range spaces {
+		if sp.SpaceType != "DIRECT_MESSAGE" || sp.SingleUserBotDM {
+			continue
+		}
+		members, err := c.Members(ctx, sp.Name)
+		if err != nil || len(members) != 2 {
+			continue
+		}
+		set := map[string]bool{members[0]: true, members[1]: true}
+		if common == nil {
+			common = set
+		} else {
+			for k := range common {
+				if !set[k] {
+					delete(common, k)
+				}
+			}
+		}
+		if n++; n >= 4 || len(common) <= 1 && n >= 2 {
+			break
+		}
+	}
+	if len(common) == 1 && n >= 2 {
+		for k := range common {
+			return k
+		}
+	}
+	return ""
+}
+
 func (a *App) userName(ctx context.Context, c *google.Client, account, user string) string {
 	if user == "" {
 		return ""
 	}
-	if name, _, ok := a.Store.User(account, user); ok {
+	if name, _, ok := a.Store.User(account, user); ok && name != "" {
 		return name
 	}
+	fallback := "user " + tail(strings.TrimPrefix(user, "users/"), 4)
+	// a failed lookup is retried at most every 30 minutes, and never stored
+	a.mu.Lock()
+	if a.missed == nil {
+		a.missed = map[string]time.Time{}
+	}
+	at, failed := a.missed[account+"/"+user]
+	a.mu.Unlock()
+	if failed && time.Since(at) < 30*time.Minute {
+		return fallback
+	}
 	_, name, email, err := c.Person(ctx, user)
-	if err != nil || name == "" {
-		name = email
+	if err != nil || name == "" && email == "" {
+		a.mu.Lock()
+		a.missed[account+"/"+user] = time.Now()
+		a.mu.Unlock()
+		return fallback
 	}
 	if name == "" {
-		name = "user " + tail(strings.TrimPrefix(user, "users/"), 4)
+		name = email
 	}
 	name = mime.Clean(name)
-	_ = a.Store.PutUser(account, user, name, mime.Clean(email)) // cache misses too, so we ask once
+	_ = a.Store.PutUser(account, user, name, mime.Clean(email))
 	return name
 }
 
@@ -427,15 +526,37 @@ func (a *App) dmName(ctx context.Context, c *google.Client, account, space, me s
 		return ""
 	}
 	var names []string
+	unknown := 0
 	for _, m := range members {
 		if m == me {
 			continue
 		}
-		if n := a.userName(ctx, c, account, m); n != "" {
-			names = append(names, n)
+		n := a.userName(ctx, c, account, m)
+		if strings.HasPrefix(n, "user ") {
+			unknown++
+			continue
+		}
+		names = append(names, n)
+	}
+	if len(names) == 0 {
+		return "" // keep trying; a placeholder title helps nobody
+	}
+	if len(members) > 2 {
+		// a group: first names, at most three
+		for i, n := range names {
+			names[i] = firstName(n)
 		}
 	}
-	return strings.Join(names, ", ")
+	extra := unknown
+	if len(names) > 3 {
+		extra += len(names) - 3
+		names = names[:3]
+	}
+	title := strings.Join(names, ", ")
+	if extra > 0 {
+		title += fmt.Sprintf(" +%d", extra)
+	}
+	return title
 }
 
 // SyncAll syncs every account's mail and chat; errors are per account.

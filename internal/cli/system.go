@@ -124,6 +124,11 @@ func daemon(a *app.App, args []string) error {
 	ctx, cancel := ctxSignal()
 	defer cancel()
 	log.SetFlags(0)
+	release, ok := a.HoldDaemonLock()
+	if !ok {
+		return errors.New("another sandesh daemon is already running")
+	}
+	defer release()
 	log.Printf("sandesh %s daemon: mail every %s, chat every %s", app.Version, a.Config.MailInterval.Duration, a.Config.ChatInterval.Duration)
 	type backoff struct {
 		next  time.Time
@@ -178,34 +183,6 @@ func daemon(a *app.App, args []string) error {
 	}
 }
 
-func unitPath() string {
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".config")
-	}
-	return filepath.Join(dir, "systemd", "user", "sandesh.service")
-}
-
-func Unit(bin string) string {
-	return fmt.Sprintf(`[Unit]
-Description=sandesh: Gmail and Google Chat sync
-Documentation=https://github.com/Theyashsawarkar/sandesh
-After=network-online.target
-StartLimitIntervalSec=0
-
-[Service]
-ExecStart=%s daemon
-Restart=on-failure
-RestartSec=5
-RestartSteps=5
-RestartMaxDelaySec=60
-
-[Install]
-WantedBy=default.target
-`, bin)
-}
-
 func service(a *app.App, args []string) error {
 	if len(args) == 0 {
 		return usageError("service install, remove or status")
@@ -217,24 +194,14 @@ func service(a *app.App, args []string) error {
 	}
 	switch args[0] {
 	case "install":
-		if err := os.MkdirAll(filepath.Dir(unitPath()), 0o755); err != nil {
+		if err := app.InstallService(); err != nil {
 			return err
 		}
-		if err := os.WriteFile(unitPath(), []byte(Unit(app.Executable())), 0o644); err != nil {
-			return err
-		}
-		if err := sc("daemon-reload"); err != nil {
-			return err
-		}
-		if err := sc("enable", "--now", "sandesh.service"); err != nil {
-			return err
-		}
-		_ = sc("restart", "sandesh.service")
-		fmt.Printf("Installed %s and started it.\nLogs: journalctl --user -u sandesh -f\n", unitPath())
+		fmt.Printf("Installed %s and started it.\nLogs: journalctl --user -u sandesh -f\n", app.UnitPath())
 		return nil
 	case "remove", "uninstall":
 		_ = sc("disable", "--now", "sandesh.service")
-		if err := os.Remove(unitPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(app.UnitPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		_ = sc("daemon-reload")

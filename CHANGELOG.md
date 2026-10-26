@@ -4,6 +4,27 @@ Newest first.
 
 ## Unreleased
 
+- **Syncs in the background, not when you open it**: the screen shows the
+  local copy at once and leaves syncing to the background service (setup
+  now installs it); it syncs by itself only when the service isn't
+  running. After a send, an archive or another change it syncs again
+  shortly so the copy matches Google. Only one process syncs an account at
+  a time.
+- **Never hits Gmail's rate limit**: requests are paced (40 quota units a
+  second), Google's "slow down" answers are retried with backoff, and a
+  first sync cut short resumes instead of starting over. The first sync
+  takes the newest 150 threads (`max_threads`); older mail comes through
+  search.
+- **Real names in chat**: names come from Chat's own messages, sandesh
+  finds which member is you from your DMs (no People API needed), DMs are
+  named after the other person and groups "Naeem, Rahul, Rugved +2";
+  placeholder "user 1234" names are no longer stored.
+- **Chat is compact**: one name line per group, a coloured bar per
+  message, no boxes; messages that are only an attachment or a card say so.
+- Errors get their own line (Esc hides it) instead of covering the keys,
+  and the common Google errors say what to do. Card borders are brighter
+  (new `border` colour).
+
 - **A new look**: the mail list is one bordered card per thread with gaps
   between them; the thread view puts each message in its own card with a
   From / To / Date header and renders HTML mail as terminal formatting
