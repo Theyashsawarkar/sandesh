@@ -620,6 +620,18 @@ func (c *Client) Messages(ctx context.Context, space string, after time.Time, ma
 }
 
 // PostMessage sends text to a space; thread (a thread name) replies in it.
+// RenameSpace changes a named space's title on Google Chat (you must be
+// allowed to: usually a space manager).
+func (c *Client) RenameSpace(ctx context.Context, space, name string) error {
+	return c.do(ctx, "PATCH", c.chat+"/"+space+"?updateMask=displayName", map[string]string{"displayName": name}, nil)
+}
+
+// IsMissingScope: the sign-in predates a permission sandesh now asks for.
+func IsMissingScope(err error) bool {
+	e, ok := err.(*APIError)
+	return ok && (strings.Contains(e.Message, "insufficient authentication scopes") || strings.Contains(e.Message, "ACCESS_TOKEN_SCOPE_INSUFFICIENT"))
+}
+
 // ChatMedia downloads a file uploaded to a chat message.
 func (c *Client) ChatMedia(ctx context.Context, resourceName string) ([]byte, error) {
 	u := root(c.chat, "/v1") + "/v1/media/" + escapePath(resourceName) + "?alt=media"

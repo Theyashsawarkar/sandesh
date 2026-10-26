@@ -6,8 +6,8 @@
 #
 # Options (set them before TPM's `run` line):
 #   @sandesh-key       key after the prefix (default e; "none" binds nothing)
-#   @sandesh-width     popup width  (default 90%)
-#   @sandesh-height    popup height (default 88%)
+#   @sandesh-width     popup width  (default 96%)
+#   @sandesh-height    popup height (default 94%)
 #   @sandesh-title     popup title  (default " sandesh ")
 #   @sandesh-launcher  your own popup command instead of display-popup: it
 #                      is run with display-popup's arguments appended
@@ -23,8 +23,8 @@ run="$dir/scripts/sandesh-run"
 
 opt() { local v; v=$(tmux show-option -gqv "$1"); printf '%s' "${v:-$2}"; }
 key=$(opt @sandesh-key e)
-width=$(opt @sandesh-width 90%)
-height=$(opt @sandesh-height 88%)
+width=$(opt @sandesh-width 96%)
+height=$(opt @sandesh-height 94%)
 title=$(opt @sandesh-title ' sandesh ')
 launcher=$(opt @sandesh-launcher '')
 

@@ -29,9 +29,10 @@
 # keybind: Tmux/sandesh | L | Add or remove a label (fzf picker)
 # keybind: Tmux/sandesh | x | Select the thread for e / d / m / M
 # keybind: Tmux/sandesh | i | Start typing a chat message right in the preview
+# keybind: Tmux/sandesh | n | Rename the chat (a space on Google Chat; a DM or group only here)
 # keybind: Tmux/sandesh | v | Save the attachments to ~/Downloads/sandesh (picker when several)
 # keybind: Tmux/sandesh | V | Open the attachments (saved to ~/Downloads/sandesh first)
-# keybind: Tmux/sandesh | U | Send a file into this chat space (upload; fzf picker)
+# keybind: Tmux/sandesh | U | Send a file into this chat space (upload; file picker with preview)
 # keybind: Tmux/sandesh | z | Cancel the last change, or a send in its undo window (undo)
 # keybind: Tmux/sandesh | A | Show the sends an agent is waiting on you to approve
 # keybind: Tmux/sandesh | R | Reload mail and chat from Google now (sync)
@@ -49,7 +50,7 @@
 # keybind: Tmux/sandesh compose | Backspace | Remove the last recipient (in an empty To, Cc or Bcc)
 # keybind: Tmux/sandesh compose | Ctrl+s | Send the mail (after the undo window)
 # keybind: Tmux/sandesh compose | Ctrl+d | Save the mail as a Gmail draft and close it
-# keybind: Tmux/sandesh compose | Ctrl+o | Add files to the mail (fzf picker; x removes one in Files)
+# keybind: Tmux/sandesh compose | Ctrl+o | Add files to the mail (file picker with preview; x removes one in Files)
 # keybind: Tmux/sandesh compose | Ctrl+e | Edit the whole mail in your editor, then come back
 # keybind: Tmux/sandesh compose | Ctrl+q | Toggle the quoted text under a reply or forward
 # keybind: Tmux/sandesh compose | Left / Right | Select a recipient pill (in an empty To, Cc or Bcc; Backspace removes it)
@@ -65,7 +66,7 @@
 # keybind: Tmux/sandesh search | Esc | Close the search window
 # keybind: Tmux/sandesh review | y | Send the message you wrote (after the undo window)
 # keybind: Tmux/sandesh review | e | Edit the message again in your editor
-# keybind: Tmux/sandesh review | + | Add a file to the message (attach; fzf picker)
+# keybind: Tmux/sandesh review | + | Add a file to the message (attach; file picker with preview)
 # keybind: Tmux/sandesh review | - | Remove the last file added to the message
 # keybind: Tmux/sandesh review | d | Save the message as a Gmail draft instead of sending
 # keybind: Tmux/sandesh review | n | Delete the message you wrote (discard)

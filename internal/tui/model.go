@@ -33,6 +33,8 @@ const (
 	modeHelp
 	modeChatMsg // typing a chat message in the preview
 	modeLink    // typing a link number after o
+	modeRename  // typing a chat's new name
+	modePick    // the file picker
 	modeCompose // the compose screen
 	modeFind    // the search window
 )
@@ -110,6 +112,10 @@ type Model struct {
 	outboxRows   map[string]store.OutboxItem // Sent: rows still in the outbox
 	comp         *composer
 	find         *finder
+	pick         *picker
+	pickMode     mode   // where the picker goes back to
+	helpQ        string // filtering the keys popup
+	helpTop      int
 	waiting      []store.OutboxItem
 	syncing      bool
 	synced       time.Time
@@ -681,6 +687,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case editedMsg:
 		return m.afterEdit(msg)
+	case pickerFilesMsg:
+		m.gotFiles(msg)
+		return m, nil
 	case findTickMsg:
 		return m, m.findServer(msg.q)
 	case findServerMsg:
@@ -737,6 +746,12 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modeFind && m.find != nil {
 		return m.finderKey(k)
 	}
+	if m.mode == modePick && m.pick != nil {
+		return m.pickerKey(k)
+	}
+	if m.mode == modeHelp {
+		return m.helpKey(k)
+	}
 	if s == "ctrl+c" {
 		return m, tea.Quit
 	}
@@ -746,7 +761,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeNormal
 		}
 		return m, nil
-	case modeFilter, modeAsk, modeSearch, modeSaveName, modeDraftHint, modeChatMsg, modeLink:
+	case modeFilter, modeAsk, modeSearch, modeSaveName, modeDraftHint, modeChatMsg, modeLink, modeRename:
 		return m.inputKey(k)
 	case modeReview:
 		return m.reviewKey(s)
@@ -806,6 +821,24 @@ func (m Model) inputKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.setErr(err.Error())
 				} else {
 					return m, m.sent(it)
+				}
+			}
+		case modeRename:
+			if sp, ok := m.curSpace(); ok {
+				a := m.a
+				return m, func() tea.Msg {
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					onGoogle, err := a.RenameSpace(ctx, sp.Account, sp.Name, text)
+					switch {
+					case err != nil:
+						return doneMsg{err: err}
+					case text == "":
+						return doneMsg{msg: "back to its own name"}
+					case onGoogle:
+						return doneMsg{msg: "renamed on Google Chat"}
+					}
+					return doneMsg{msg: "named here (Google Chat doesn't name DMs and groups)"}
 				}
 			}
 		case modeLink:
@@ -1026,6 +1059,10 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 			m.openLink("1")
 		default:
 			m.mode, m.input = modeLink, nil
+		}
+	case "n":
+		if sp, ok := m.curSpace(); ok {
+			m.mode, m.input = modeRename, []rune(cli.SpaceTitle(sp))
 		}
 	case "i":
 		if m.tab == tabChat {

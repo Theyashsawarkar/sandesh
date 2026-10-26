@@ -136,6 +136,35 @@ func (a *App) Signature(ctx context.Context, account string, refresh bool) strin
 	return sig
 }
 
+// RenameSpace renames a chat. A named space is renamed on Google Chat
+// (everyone sees it); a DM or an unnamed group can't be, so the name is
+// kept on this machine. "" removes your own name.
+func (a *App) RenameSpace(ctx context.Context, account, space, name string) (onGoogle bool, err error) {
+	sp, err := a.Store.Space(account, space)
+	if err != nil {
+		return false, err
+	}
+	name = strings.TrimSpace(mime.Clean(name))
+	if sp.Type != "SPACE" || name == "" {
+		return false, a.Store.SetAlias(account, space, name)
+	}
+	c, err := a.Client(account)
+	if err != nil {
+		return false, err
+	}
+	if err := c.RenameSpace(ctx, space, name); err != nil {
+		switch {
+		case google.IsMissingScope(err):
+			return false, fmt.Errorf("renaming spaces needs one more Google permission: sign in again with `sandesh auth add %s`", account)
+		case strings.Contains(err.Error(), "permission") || strings.Contains(err.Error(), "403"):
+			return false, fmt.Errorf("Google Chat says you can't rename this space (only its managers can)")
+		}
+		return false, err
+	}
+	_ = a.Store.SetAlias(account, space, "")
+	return true, a.Store.RenameSpace(account, space, name)
+}
+
 // Retry sends a failed message again (straight away).
 func (a *App) Retry(id int64) error {
 	ok, err := a.Store.Transition(id, store.StatusFailed, store.StatusQueued, time.Now().UnixMilli())

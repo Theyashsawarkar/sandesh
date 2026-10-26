@@ -90,7 +90,7 @@ func Open(path string) (*Store, error) {
 }
 
 // schemaVersion: bump it with a step in migrate.
-const schemaVersion = 8
+const schemaVersion = 9
 
 func migrate(db *sql.DB) error {
 	var v int
@@ -157,6 +157,12 @@ func migrate(db *sql.DB) error {
 		// v8: the backfill of older mail, page by page
 		if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS backfill (account TEXT PRIMARY KEY, page TEXT NOT NULL DEFAULT '',
 		  done INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0, query TEXT NOT NULL DEFAULT '')`); err != nil {
+			return err
+		}
+	}
+	if v < 9 {
+		// v9: your own name for a chat (only on this machine)
+		if _, err := db.Exec(`ALTER TABLE spaces ADD COLUMN alias TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err
 		}
 	}
@@ -804,7 +810,8 @@ type Space struct {
 	Account     string `json:"account"`
 	Name        string `json:"id"`
 	DisplayName string `json:"name"`
-	Type        string `json:"type"` // SPACE, GROUP_CHAT, DIRECT_MESSAGE
+	Alias       string `json:"alias,omitempty"` // your own name for it, on this machine
+	Type        string `json:"type"`            // SPACE, GROUP_CHAT, DIRECT_MESSAGE
 	LastActive  int64  `json:"last_active"`
 	LastRead    int64  `json:"-"`
 	SyncedTo    int64  `json:"-"`
@@ -908,6 +915,12 @@ func (s *Store) ResetDMTitles(account string) error {
 	return err
 }
 
+// SetAlias names a chat on this machine only ("" removes the name).
+func (s *Store) SetAlias(account, space, alias string) error {
+	_, err := s.db.Exec(`UPDATE spaces SET alias=? WHERE account=? AND name=?`, alias, account, space)
+	return err
+}
+
 // RenameSpace sets a DM or group's title (they have none of their own).
 func (s *Store) RenameSpace(account, space, name string) error {
 	_, err := s.db.Exec(`UPDATE spaces SET display_name=? WHERE account=? AND name=?`, name, account, space)
@@ -988,7 +1001,7 @@ func (s *Store) PutChatMessages(msgs []ChatMessage) error {
 // Spaces lists spaces, most recently active first, with unread counts
 // (messages from others after the space's read time).
 func (s *Store) Spaces(accounts []string, me map[string]string) ([]Space, error) {
-	q := `SELECT s.account,s.name,s.display_name,s.type,s.last_active,s.last_read,s.synced_to,
+	q := `SELECT s.account,s.name,s.display_name,s.alias,s.type,s.last_active,s.last_read,s.synced_to,
 	  (SELECT COUNT(*) FROM chat_messages c JOIN accounts a ON a.name=c.account WHERE c.account=s.account AND c.space=s.name AND c.created>s.last_read AND c.sender<>a.chat_user),
 	  COALESCE((SELECT c.text FROM chat_messages c WHERE c.account=s.account AND c.space=s.name ORDER BY c.created DESC LIMIT 1),''),
 	  COALESCE((SELECT CASE WHEN c.sender<>'' AND c.sender=(SELECT chat_user FROM accounts WHERE name=s.account) THEN 'You' ELSE c.sender_name END
@@ -1010,7 +1023,7 @@ func (s *Store) Spaces(accounts []string, me map[string]string) ([]Space, error)
 	var out []Space
 	for rows.Next() {
 		var sp Space
-		if err := rows.Scan(&sp.Account, &sp.Name, &sp.DisplayName, &sp.Type, &sp.LastActive, &sp.LastRead, &sp.SyncedTo, &sp.Unread, &sp.LastText, &sp.LastSender); err != nil {
+		if err := rows.Scan(&sp.Account, &sp.Name, &sp.DisplayName, &sp.Alias, &sp.Type, &sp.LastActive, &sp.LastRead, &sp.SyncedTo, &sp.Unread, &sp.LastText, &sp.LastSender); err != nil {
 			return nil, err
 		}
 		out = append(out, sp)

@@ -235,9 +235,10 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `L` | Add or remove a label (fzf picker) |
 | `x` | Select the thread for e / d / m / M |
 | `i` | Start typing a chat message right in the preview |
+| `n` | Rename the chat (a space on Google Chat; a DM or group only here) |
 | `v` | Save the attachments to ~/Downloads/sandesh (picker when several) |
 | `V` | Open the attachments (saved to ~/Downloads/sandesh first) |
-| `U` | Send a file into this chat space (upload; fzf picker) |
+| `U` | Send a file into this chat space (upload; file picker with preview) |
 | `z` | Cancel the last change, or a send in its undo window (undo) |
 | `A` | Show the sends an agent is waiting on you to approve |
 | `R` | Reload mail and chat from Google now (sync) |
@@ -259,6 +260,23 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 |---|---|
 | `?` | Show every key |
 | `q` / `Esc` | Go back, then quit |
+
+**Keys** (`?`): a window in the middle of the screen with every key,
+grouped, and a filter: type `send` and only the keys that send stay.
+
+**Picking files** (`Ctrl+o` in a mail, `+` when reviewing, `U` in chat): a
+window listing the files under the folder you're in (`Ctrl+r` switches to
+home or Downloads, `Ctrl+h` shows hidden ones). Type to narrow it down; the
+right side previews the highlighted file: text with line numbers, an
+image's size (the picture itself with `chafa` installed), a PDF's first
+page (with `pdftotext`). `Tab` picks several, `Enter` adds them.
+
+**Renaming a chat** (`n`): a space is renamed on Google Chat, so everyone
+sees the new name (Google lets only its managers do it; sandesh asks for the
+permission when you sign in, so an older sign-in needs `sandesh auth add
+<account>` once). DMs and unnamed group chats can't be named on Google;
+the name you give them stays on this machine. An empty name goes back to
+the default.
 
 **Searching** (`/` or `s`): a floating window over the screen. Results
 from this machine show as you type (mail and chat, matches highlighted,
@@ -297,7 +315,7 @@ whole mail there and back, or set `compose = "editor"`.
 | `Backspace` | Remove the last recipient (in an empty To, Cc or Bcc) |
 | `Ctrl+s` | Send the mail (after the undo window) |
 | `Ctrl+d` | Save the mail as a Gmail draft and close it |
-| `Ctrl+o` | Add files to the mail (fzf picker; x removes one in Files) |
+| `Ctrl+o` | Add files to the mail (file picker with preview; x removes one in Files) |
 | `Ctrl+e` | Edit the whole mail in your editor, then come back |
 | `Ctrl+q` | Toggle the quoted text under a reply or forward |
 | `Left` / `Right` | Select a recipient pill (in an empty To, Cc or Bcc; Backspace removes it) |
@@ -315,7 +333,7 @@ whole mail there and back, or set `compose = "editor"`.
 |---|---|---|
 | `y` | Send the message you wrote (after the undo window) | Send the message an agent wrote (after the undo window) |
 | `e` | Edit the message again in your editor | Edit the agent's message in your editor first |
-| `+` | Add a file to the message (attach; fzf picker) | |
+| `+` | Add a file to the message (attach; file picker with preview) | |
 | `-` | Remove the last file added to the message | |
 | `d` | Save the message as a Gmail draft instead of sending | |
 | `n` | Delete the message you wrote (discard) | Cancel the agent's message (decline; nothing is sent) |
@@ -474,7 +492,7 @@ plugin builds its own copy with Go the first time.
 | Option | Default | |
 |---|---|---|
 | `@sandesh-key` | `e` | Key after the prefix; `none` binds nothing |
-| `@sandesh-width` / `@sandesh-height` | `90%` / `88%` | Popup size |
+| `@sandesh-width` / `@sandesh-height` | `96%` / `94%` | Popup size |
 | `@sandesh-title` | ` sandesh ` | Popup title |
 | `@sandesh-launcher` | | Your own popup command, run with display-popup's arguments appended (e.g. `"~/.tmux/scripts/popup.sh '#{client_name}'"`) |
 

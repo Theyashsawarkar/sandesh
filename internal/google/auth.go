@@ -26,7 +26,7 @@ import (
 var (
 	MailScopes = []string{"https://www.googleapis.com/auth/gmail.modify", "profile"}
 	ChatScopes = []string{
-		"https://www.googleapis.com/auth/chat.spaces.readonly",
+		"https://www.googleapis.com/auth/chat.spaces", // read, and rename spaces you manage
 		"https://www.googleapis.com/auth/chat.messages",
 		"https://www.googleapis.com/auth/chat.memberships.readonly",
 		"https://www.googleapis.com/auth/chat.users.readstate",

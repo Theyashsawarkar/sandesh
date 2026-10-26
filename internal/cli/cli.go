@@ -908,6 +908,8 @@ func FindSpace(a *app.App, key string) (store.Space, error) {
 
 func SpaceTitle(s store.Space) string {
 	switch {
+	case s.Alias != "":
+		return s.Alias
 	case s.DisplayName != "":
 		return s.DisplayName
 	case s.Type == "DIRECT_MESSAGE":

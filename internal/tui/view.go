@@ -48,6 +48,17 @@ func newStyles(c config.Colors, nerd bool) styles {
 	}
 }
 
+func (m Model) renamePrompt() string {
+	sp, ok := m.curSpace()
+	if !ok {
+		return "name: "
+	}
+	if sp.Type == "SPACE" {
+		return "rename on Google Chat (everyone sees it): "
+	}
+	return "name this chat (only here; empty: back to the default): "
+}
+
 func thousands(n int) string {
 	s := fmt.Sprint(n)
 	for i := len(s) - 3; i > 0; i -= 3 {
@@ -76,7 +87,7 @@ func (m Model) previewHeight() int { return m.bodyHeight() - 2 }
 
 func (m Model) inputMode() bool {
 	switch m.mode {
-	case modeFilter, modeAsk, modeSearch, modeSaveName, modeDraftHint, modeLink:
+	case modeFilter, modeAsk, modeSearch, modeSaveName, modeDraftHint, modeLink, modeRename:
 		return true
 	}
 	return false
@@ -94,8 +105,6 @@ func (m Model) View() string {
 	left := m.box(lw, bh, m.listTitle(), m.listView(lw-2, bh-2), m.focus == 0 && m.mode == modeNormal, m.styles.c.Accent)
 	var right string
 	switch m.mode {
-	case modeHelp:
-		right = m.box(pw, bh, "keys", m.helpView(pw-4, bh-2), true, m.styles.c.Accent)
 	case modeReview:
 		right = m.box(pw, bh, "review: y send · e edit · + file · d draft · n discard", m.reviewView(pw-4, bh-2), true, m.styles.c.Accent2)
 	case modeApprove:
@@ -108,8 +117,15 @@ func (m Model) View() string {
 	} else {
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, left, right))
 	}
-	if m.mode == modeFind && m.find != nil {
+	switch {
+	case m.mode == modeFind && m.find != nil:
 		rows[len(rows)-1] = overlay(rows[len(rows)-1], m.finderView(), m.w)
+	case m.mode == modeHelp:
+		box := m.helpPopup()
+		rows[len(rows)-1] = overlayAt(rows[len(rows)-1], box, m.w, max(0, (bh-len(box))/2))
+	case m.mode == modePick && m.pick != nil:
+		box := m.pickerPopup()
+		rows[len(rows)-1] = overlayAt(rows[len(rows)-1], box, m.w, max(0, (bh-len(box))/2))
 	}
 	if len(m.waiting) > 0 && m.mode != modeApprove {
 		rows = append(rows, m.styles.round(m.styles.banner, fmt.Sprintf("󰀦 %d send(s) from an agent wait for your approval · press A", len(m.waiting))))
@@ -269,60 +285,6 @@ func (m Model) aiLines(w int) []string {
 }
 
 // helpView lists every key by group, in two columns when one is too tall.
-func (m Model) helpView(w, h int) string {
-	s := m.styles
-	var groups [][]string
-	for _, k := range Keys {
-		if k.Group == "Review" || k.Group == "Approve" || k.Group == "Setup" || k.Group == "Compose" || k.Group == "Search" {
-			continue
-		}
-		if len(groups) == 0 || !strings.EqualFold(stripANSI(groups[len(groups)-1][0]), k.Group) {
-			groups = append(groups, []string{s.accent.Bold(true).Render(strings.ToLower(k.Group))})
-		}
-		g := &groups[len(groups)-1]
-		*g = append(*g, s.yellow.Render(fmt.Sprintf("%-15s", k.Keys))+" "+s.text.Render(k.Desc))
-	}
-	var one []string
-	for i, g := range groups {
-		if i > 0 {
-			one = append(one, "")
-		}
-		one = append(one, g...)
-	}
-	one = append(one, "", s.muted.Render("? or Esc closes"))
-	if len(one) <= h || w < 90 {
-		return strings.Join(one, "\n")
-	}
-	// two columns: fill the left one group by group
-	var left, right []string
-	for _, g := range groups {
-		if len(left)+len(g)+1 <= h-2 && len(right) == 0 {
-			if len(left) > 0 {
-				left = append(left, "")
-			}
-			left = append(left, g...)
-		} else {
-			if len(right) > 0 {
-				right = append(right, "")
-			}
-			right = append(right, g...)
-		}
-	}
-	right = append(right, "", s.muted.Render("? or Esc closes"))
-	cw := w/2 - 1
-	var out []string
-	for i := 0; i < max(len(left), len(right)); i++ {
-		l, r := "", ""
-		if i < len(left) {
-			l = ansi.Truncate(left[i], cw, "…")
-		}
-		if i < len(right) {
-			r = ansi.Truncate(right[i], cw, "…")
-		}
-		out = append(out, l+strings.Repeat(" ", max(1, cw-lipgloss.Width(l)+2))+r)
-	}
-	return strings.Join(out, "\n")
-}
 
 func stripANSI(s string) string { return ansi.Strip(s) }
 
@@ -410,14 +372,14 @@ func firstNonEmpty(xs ...string) string {
 func (m Model) inputView() string {
 	s := m.styles
 	prompt := map[mode]string{modeFilter: "/", modeAsk: "@claude ", modeSearch: "search gmail: ", modeSaveName: "section name (Enter: the search itself): ",
-		modeDraftHint: "draft a reply that says (Enter for Claude's pick): ", modeLink: fmt.Sprintf("open link (1-%d): ", len(m.links))}[m.mode]
+		modeDraftHint: "draft a reply that says (Enter for Claude's pick): ", modeLink: fmt.Sprintf("open link (1-%d): ", len(m.links)), modeRename: m.renamePrompt()}[m.mode]
 	return " " + s.accent2.Bold(true).Render(prompt) + s.text.Render(string(m.input)) + s.accent.Render("▏")
 }
 
 func (m Model) footerView() string {
 	s := m.styles
 	modeName := map[mode]string{modeNormal: "normal", modeFilter: "filter", modeAsk: "ask", modeSearch: "search", modeSaveName: "save",
-		modeDraftHint: "draft", modeReview: "review", modeApprove: "approve", modeHelp: "keys", modeChatMsg: "message", modeLink: "link", modeCompose: "compose", modeFind: "search"}[m.mode]
+		modeDraftHint: "draft", modeReview: "review", modeApprove: "approve", modeHelp: "keys", modeChatMsg: "message", modeLink: "link", modeCompose: "compose", modeFind: "search", modeRename: "rename", modePick: "files"}[m.mode]
 	var keys [][2]string
 	switch m.mode {
 	case modeReview:
@@ -427,6 +389,8 @@ func (m Model) footerView() string {
 		}
 	case modeApprove:
 		keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"n", "decline"}, {"q", "later"}}
+	case modePick:
+		keys = [][2]string{{"↑↓", "move"}, {"tab", "pick several"}, {"enter", "add"}, {"esc", "close"}}
 	case modeFind:
 		keys = [][2]string{{"↑↓", "move"}, {"enter", "open"}, {"tab", "mail/chat"}, {"esc", "close"}}
 	case modeCompose:
@@ -437,7 +401,7 @@ func (m Model) footerView() string {
 		if m.comp != nil && m.comp.approveID > 0 {
 			keys = [][2]string{{"tab", "next"}, {"ctrl+s", "keep changes"}, {"ctrl+e", "editor"}, {"esc", "back"}}
 		}
-	case modeFilter, modeAsk, modeSearch, modeSaveName, modeDraftHint, modeLink:
+	case modeFilter, modeAsk, modeSearch, modeSaveName, modeDraftHint, modeLink, modeRename:
 		keys = [][2]string{{"enter", "done"}, {"esc", "cancel"}, {"ctrl+u", "clear"}}
 	case modeChatMsg:
 		keys = [][2]string{{"enter", "send"}, {"esc", "cancel"}, {"ctrl+u", "clear"}}

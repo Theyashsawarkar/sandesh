@@ -437,3 +437,36 @@ func TestLoadOlder(t *testing.T) {
 		t.Fatalf("nothing older left, got %d", n)
 	}
 }
+
+func TestRenameSpace(t *testing.T) {
+	a, g := setup(t)
+	ctx := context.Background()
+	if _, errs := a.SyncAll(ctx); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	// a named space: renamed on Google Chat
+	onGoogle, err := a.RenameSpace(ctx, "work", "spaces/portal-dev", "Portal team")
+	if err != nil || !onGoogle {
+		t.Fatalf("space: %v %v", onGoogle, err)
+	}
+	for _, sp := range g.Spaces {
+		if sp.Name == "spaces/portal-dev" && sp.DisplayName != "Portal team" {
+			t.Fatalf("Google still says %q", sp.DisplayName)
+		}
+	}
+	// a DM: named on this machine only, and a sync keeps it
+	if onGoogle, err := a.RenameSpace(ctx, "work", "spaces/dm-priya", "Priya (release)"); err != nil || onGoogle {
+		t.Fatalf("dm: %v %v", onGoogle, err)
+	}
+	if _, errs := a.SyncAll(ctx); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	sp, _ := a.Store.Space("work", "spaces/dm-priya")
+	if sp.Alias != "Priya (release)" {
+		t.Fatalf("alias after sync: %+v", sp)
+	}
+	_, _ = a.RenameSpace(ctx, "work", "spaces/dm-priya", "")
+	if sp, _ := a.Store.Space("work", "spaces/dm-priya"); sp.Alias != "" {
+		t.Fatal("an empty name should drop the alias")
+	}
+}

@@ -411,6 +411,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			sp.LastRead, _ = time.Parse(time.RFC3339Nano, fmt.Sprint(body["lastReadTime"]))
 		}
 		write(w, map[string]string{"lastReadTime": sp.LastRead.UTC().Format(time.RFC3339Nano)})
+	case strings.HasPrefix(p, "/chat/v1/spaces/") && r.Method == "PATCH":
+		sp := s.space(strings.TrimPrefix(p, "/chat/v1/"))
+		if sp == nil {
+			fail(w, 404, "no space")
+			return
+		}
+		sp.DisplayName = fmt.Sprint(body["displayName"])
+		write(w, map[string]string{"name": sp.Name, "displayName": sp.DisplayName})
 	case strings.HasPrefix(p, "/chat/v1/spaces/") && strings.HasSuffix(p, "/members"):
 		sp := s.space(strings.TrimSuffix(strings.TrimPrefix(p, "/chat/v1/"), "/members"))
 		if sp == nil {

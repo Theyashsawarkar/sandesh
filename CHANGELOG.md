@@ -4,6 +4,17 @@ Newest first.
 
 ## Unreleased
 
+- **`?` is a window**: every key, grouped in columns in the middle of the
+  screen, with a filter as you type.
+- **A file picker of its own** (replacing fzf): a window over the screen
+  with fuzzy matching and a preview of the highlighted file (text, image
+  size or the picture itself with chafa, a PDF's first page with
+  pdftotext); Tab picks several; Ctrl+r switches folder, Ctrl+h hidden.
+- **Rename a chat (`n`)**: spaces on Google Chat (new `chat.spaces`
+  permission; sign in again once), DMs and unnamed groups by a name kept on
+  this machine.
+- The popup is bigger by default (96% × 94%).
+
 - **Round ends on every filled label**: @mentions in chat, the active tab,
   the mode label, key hints, the send button and the approval banner use
   Nerd Font half circles like the avatars (`nerd_font = false` keeps square).
