@@ -114,7 +114,8 @@ func (m Model) afterEdit(msg editedMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		return m, nil
 	}
-	m.review = &review{kind: msg.kind, account: msg.account, out: out}
+	m.review = &review{kind: msg.kind, account: msg.account, out: out, replaceID: m.replaceNext}
+	m.replaceNext = 0
 	m.mode = modeReview
 	return m, nil
 }
@@ -176,6 +177,12 @@ func (m Model) reviewKey(s string) (tea.Model, tea.Cmd) {
 	}
 	switch s {
 	case "y":
+		if r.replaceID > 0 {
+			if err := m.a.Cancel(r.replaceID); err != nil {
+				m.setErr("couldn't replace it: " + err.Error())
+				return m, nil
+			}
+		}
 		it, err := m.a.Queue(r.account, r.kind, r.out, app.OriginYou)
 		if err != nil {
 			m.setErr(err.Error())

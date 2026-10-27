@@ -186,6 +186,9 @@ func (m Model) tabsView() string {
 			if name == "All" && m.chatN > 0 {
 				label += fmt.Sprintf(" %d", m.chatN)
 			}
+			if name == "Scheduled" && m.chatScheduled > 0 {
+				label += fmt.Sprintf(" %d", m.chatScheduled)
+			}
 			if i == m.sec {
 				parts = append(parts, s.round(s.tabOn, label))
 			} else {

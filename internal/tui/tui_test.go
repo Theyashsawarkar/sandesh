@@ -290,12 +290,19 @@ func TestSchedule(t *testing.T) {
 	if len(q) != 1 || q[0].Out.ScheduledFor == 0 || time.Until(time.UnixMilli(q[0].SendAt)) < 119*time.Minute {
 		t.Fatalf("scheduled: %+v", q)
 	}
-	// it sits on top of Sent with its time; t moves it
+	// it's in the Scheduled tab (not Sent) with its time; t moves it
 	for m.currentSection().Label != "SENT" {
 		m = press(m, "l")
 	}
+	if strings.Contains(m.View(), "⏰") {
+		t.Fatal("Sent shouldn't list scheduled mail")
+	}
+	m = press(m, "l")
+	if m.currentSection().Label != "SCHEDULED" || !strings.Contains(m.View(), "Scheduled 1") {
+		t.Fatalf("no Scheduled tab:\n%s", m.View())
+	}
 	if !strings.Contains(m.View(), "⏰ in 120 min") && !strings.Contains(m.View(), "⏰ today") && !strings.Contains(m.View(), "⏰ tomorrow") {
-		t.Fatalf("Sent doesn't show the scheduled mail:\n%s", m.View())
+		t.Fatalf("Scheduled doesn't show the mail:\n%s", m.View())
 	}
 	m = press(m, "g", "t")
 	m = typeText(m, "tomorrow 10am")
@@ -303,5 +310,31 @@ func TestSchedule(t *testing.T) {
 	it, _ := m.a.Store.OutboxItem(q[0].ID)
 	if time.UnixMilli(it.SendAt).Hour() != 10 {
 		t.Fatalf("moved: %v", time.UnixMilli(it.SendAt))
+	}
+}
+
+func TestScheduledChat(t *testing.T) {
+	m := model(t)
+	m = press(m, "tab", "j", "i") // chat, portal-dev, type
+	m = typeText(m, "standup notes")
+	m = press(m, "ctrl+t")
+	m = typeText(m, "tomorrow 9am")
+	m = press(m, "enter")
+	q, _ := m.a.Store.Outbox(store.StatusQueued)
+	if len(q) != 1 || q[0].Kind != "chat" || q[0].Out.ScheduledFor == 0 {
+		t.Fatalf("scheduled chat: %+v", q)
+	}
+	for chatSections[m.sec] != "Scheduled" {
+		m = press(m, "l")
+	}
+	if len(m.spaces) != 1 || !strings.Contains(m.View(), "⏰ tomorrow 09:00") || !strings.Contains(m.View(), "Scheduled 1") {
+		t.Fatalf("chat Scheduled tab:\n%s", m.View())
+	}
+	if _, ok := m.curSpace(); ok {
+		t.Fatal("a scheduled row is not a space")
+	}
+	m = press(m, "z")
+	if it, _ := m.a.Store.OutboxItem(q[0].ID); it.Status != store.StatusCancelled || len(m.spaces) != 0 {
+		t.Fatalf("z should cancel it: %s, %d rows", it.Status, len(m.spaces))
 	}
 }

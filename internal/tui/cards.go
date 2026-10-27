@@ -181,6 +181,12 @@ func (m *Model) listView(w, h int) string {
 	s := m.styles
 	if m.count() == 0 {
 		msg := "Nothing here."
+		switch {
+		case m.tab == tabMail && m.currentSection().Label == "SCHEDULED":
+			msg = "Nothing scheduled. Ctrl+t in a mail sends it later."
+		case m.tab == tabChat && chatSections[m.sec%len(chatSections)] == "Scheduled":
+			msg = "Nothing scheduled. Ctrl+t while typing a message (i) sends it later."
+		}
 		if m.filter != "" {
 			msg = "Nothing matches /" + m.filter + " (Esc clears)"
 		} else if m.syncing {
@@ -265,6 +271,20 @@ func (m *Model) listView(w, h int) string {
 			lines = []string{row(who, s.muted.Render(cli.When(t.LastDate)), cw), subj, row(snip, chipStr, cw)}
 		} else {
 			sp := m.spaces[i]
+			if it, ok := m.outboxRows[sp.Name]; ok {
+				// a scheduled message: where it goes, when, what
+				status, col := m.outboxStatus(it)
+				if !sel {
+					border = col
+				}
+				lines = []string{row(m.avatar(sp.DisplayName)+" "+s.text.Render("→ "+sp.DisplayName), fg(col).Render(status), cw),
+					m.indent() + ansi.Truncate(s.muted.Render(sp.LastText), cw-lipgloss.Width(m.indent()), "…")}
+				for _, l := range m.cardBox(lines, cw, border, sel, false) {
+					out = append(out, " "+l)
+				}
+				out = append(out, "")
+				continue
+			}
 			dot = sp.Unread > 0
 			name := cli.SpaceTitle(sp)
 			mark := s.muted.Render("# ")
@@ -287,7 +307,7 @@ func (m *Model) listView(w, h int) string {
 		out = append(out, "")
 	}
 	// the end of a mail list: older mail comes from Gmail on demand
-	if m.tab == tabMail && m.offset+visible >= m.count() && !m.currentSection().Today {
+	if m.tab == tabMail && m.offset+visible >= m.count() && !m.currentSection().Today && m.currentSection().Label != "SCHEDULED" {
 		sec := m.currentSection().Name
 		var hint string
 		switch {

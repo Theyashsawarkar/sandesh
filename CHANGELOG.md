@@ -4,6 +4,11 @@ Newest first.
 
 ## Unreleased
 
+- **Scheduled tabs**: scheduled mail has its own **Scheduled** section next
+  to Sent, and scheduled chat messages a **Scheduled** tab in chat, soonest
+  first with their time and counts on the tabs (`t` moves, Enter edits, `z`
+  cancels). Sent goes back to mail that went (and what's sending or failed).
+
 - **Send later**: `Ctrl+t` in a mail, `t` on review, `Ctrl+t` while typing a
   chat message: pick a time or type it ("tomorrow 9am", "fri 6pm", "in 2h",
   "3 nov 10:30"). Scheduled sends wait in the outbox and the background

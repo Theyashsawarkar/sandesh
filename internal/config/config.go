@@ -144,6 +144,7 @@ func Default() Config {
 			{Name: "Unread", Label: "UNREAD"},
 			{Name: "Starred", Label: "STARRED"},
 			{Name: "Sent", Label: "SENT"},
+			{Name: "Scheduled", Label: "SCHEDULED"}, // waiting in sandesh's outbox, not a Gmail label
 		},
 		// Catppuccin Mocha, the fallback when no theme is included.
 		Colors: Colors{

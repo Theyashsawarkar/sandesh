@@ -43,7 +43,7 @@ var Keys = []Key{
 	{"Act", "L", "Add or remove a label (fzf picker)"},
 	{"Act", "x", "Select the thread for e / d / m / M"},
 	{"Act", "i", "Start typing a chat message right in the preview (Ctrl+t sends it later)"},
-	{"Act", "t", "Move a scheduled send to another time (in Sent; Enter edits it)"},
+	{"Act", "t", "Move a scheduled send to another time (in Scheduled; Enter edits it)"},
 	{"Act", "n", "Rename the chat (a space on Google Chat; a DM or group only here)"},
 	{"Act", "v", "Save the attachments to ~/Downloads/sandesh (picker when several)"},
 	{"Act", "V", "Open the attachments (saved to ~/Downloads/sandesh first)"},

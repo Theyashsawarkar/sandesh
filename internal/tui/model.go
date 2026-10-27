@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -45,7 +46,7 @@ const (
 	tabChat
 )
 
-var chatSections = []string{"All", "Unread", "DMs", "Spaces"}
+var chatSections = []string{"All", "Unread", "DMs", "Spaces", "Scheduled"}
 
 type undo struct {
 	what     string // archive, trash, read, unread, star, unstar, send
@@ -55,9 +56,10 @@ type undo struct {
 }
 
 type review struct {
-	kind    string // mail | chat
-	account string
-	out     store.Outgoing
+	kind      string // mail | chat
+	account   string
+	out       store.Outgoing
+	replaceID int64 // editing a waiting send: it makes way on send
 }
 
 type Model struct {
@@ -94,40 +96,42 @@ type Model struct {
 	showQuoted bool
 	labelNames map[string]string
 
-	mode         mode
-	input        []rune
-	filter       string
-	ai           string
-	aiTitle      string
-	aiBusy       bool
-	toast        string
-	toastAt      time.Time
-	undo         *undo
-	review       *review
-	older        store.Backfill // the download of older mail, all accounts
-	olderN       int            // how many "load older" fetches
-	loadingOlder bool
-	noOlder      map[string]bool             // sections with nothing older on Gmail
-	dbStamp      string                      // when the local copy last changed
-	sentStat     map[string]store.SentStatus // Sent: did they answer?
-	outboxRows   map[string]store.OutboxItem // Sent: rows still in the outbox
-	comp         *composer
-	find         *finder
-	flashMsg     string         // a chat message opened from search: marked
-	chatMsgLine  map[string]int // where each chat message starts in the preview
-	pick         *picker
-	when         *whenPicker
-	pickMode     mode   // where the picker goes back to
-	helpQ        string // filtering the keys popup
-	helpTop      int
-	waiting      []store.OutboxItem
-	syncing      bool
-	synced       time.Time
-	err          string
-	errAt        time.Time
-	atBottom     bool // the preview is scrolled to its end
-	themeStamp   string
-	lastSync     time.Time
+	mode          mode
+	input         []rune
+	filter        string
+	ai            string
+	aiTitle       string
+	aiBusy        bool
+	toast         string
+	toastAt       time.Time
+	undo          *undo
+	review        *review
+	older         store.Backfill // the download of older mail, all accounts
+	olderN        int            // how many "load older" fetches
+	loadingOlder  bool
+	noOlder       map[string]bool             // sections with nothing older on Gmail
+	dbStamp       string                      // when the local copy last changed
+	chatScheduled int                         // scheduled chat messages, for the tab
+	replaceNext   int64                       // the waiting send the editor is changing
+	sentStat      map[string]store.SentStatus // Sent: did they answer?
+	outboxRows    map[string]store.OutboxItem // Sent: rows still in the outbox
+	comp          *composer
+	find          *finder
+	flashMsg      string         // a chat message opened from search: marked
+	chatMsgLine   map[string]int // where each chat message starts in the preview
+	pick          *picker
+	when          *whenPicker
+	pickMode      mode   // where the picker goes back to
+	helpQ         string // filtering the keys popup
+	helpTop       int
+	waiting       []store.OutboxItem
+	syncing       bool
+	synced        time.Time
+	err           string
+	errAt         time.Time
+	atBottom      bool // the preview is scrolled to its end
+	themeStamp    string
+	lastSync      time.Time
 }
 
 func New(a *app.App, launch string) Model {
@@ -189,6 +193,9 @@ func (m *Model) reload() {
 				}
 			}
 			m.counts[s.Name] = n
+			if s.Label == "SCHEDULED" {
+				m.counts[s.Name] = len(m.outboxItems(accs, "mail", true))
+			}
 		}
 	}
 	sps, _ := m.a.Store.Spaces(accs, nil)
@@ -198,6 +205,7 @@ func (m *Model) reload() {
 			m.chatN++
 		}
 	}
+	m.chatScheduled = len(m.outboxItems(accs, "chat", true))
 	if m.tab == tabMail {
 		ts, err := m.a.SectionThreads(m.currentSection(), accs)
 		if err != nil {
@@ -207,8 +215,11 @@ func (m *Model) reload() {
 			ts = filterThreads(ts, m.filter)
 		}
 		m.sentStat, m.outboxRows = nil, nil
+		if m.search == nil && m.currentSection().Label == "SCHEDULED" {
+			ts = m.outboxThreads(m.outboxItems(accs, "mail", true))
+		}
 		if m.search == nil && m.currentSection().Label == "SENT" {
-			ts = append(m.outboxThreads(accs), ts...)
+			ts = append(m.outboxThreads(m.outboxItems(accs, "mail", false)), ts...)
 			m.sentStat = map[string]store.SentStatus{}
 			byAcc := map[string][]string{}
 			for _, t := range ts {
@@ -221,7 +232,22 @@ func (m *Model) reload() {
 			}
 		}
 		m.threads = ts
+	} else if chatSections[m.sec%len(chatSections)] == "Scheduled" {
+		m.outboxRows = map[string]store.OutboxItem{}
+		types := map[string]string{}
+		for _, s := range sps {
+			types[s.Account+"/"+s.Name] = s.Type
+		}
+		var out []store.Space
+		for _, it := range m.outboxItems(accs, "chat", true) {
+			id := fmt.Sprintf("%s%d", outboxPrefix, it.ID)
+			m.outboxRows[id] = it
+			out = append(out, store.Space{Account: it.Account, Name: id, DisplayName: it.Out.SpaceName, Type: types[it.Account+"/"+it.Out.Space],
+				LastActive: it.Out.ScheduledFor, LastText: oneLine(it.Out.Body), LastSender: "You"})
+		}
+		m.spaces = out
 	} else {
+		m.outboxRows = nil
 		var out []store.Space
 		for _, s := range sps {
 			switch chatSections[m.sec%len(chatSections)] {
@@ -329,7 +355,7 @@ type olderMsg struct {
 // loadOlderCmd fetches the next older batch of the section from Gmail.
 func (m *Model) loadOlderCmd() tea.Cmd {
 	sec := m.currentSection()
-	if m.loadingOlder || m.noOlder[sec.Name] || sec.Today {
+	if m.loadingOlder || m.noOlder[sec.Name] || sec.Today || sec.Label == "SCHEDULED" {
 		return nil
 	}
 	oldest := map[string]int64{}
@@ -366,22 +392,41 @@ func (m *Model) loadOlderCmd() tea.Cmd {
 const outboxPrefix = "outbox:"
 
 func (m *Model) curOutbox() (store.OutboxItem, bool) {
-	if m.tab != tabMail || m.sel >= len(m.threads) {
-		return store.OutboxItem{}, false
+	key := ""
+	switch {
+	case m.tab == tabMail && m.sel < len(m.threads):
+		key = m.threads[m.sel].ID
+	case m.tab == tabChat && m.sel < len(m.spaces):
+		key = m.spaces[m.sel].Name
 	}
-	it, ok := m.outboxRows[m.threads[m.sel].ID]
+	it, ok := m.outboxRows[key]
 	return it, ok
 }
 
-func (m *Model) outboxThreads(accs []string) []store.Thread {
+// outboxItems: what's still in the outbox, of one kind; scheduled ones,
+// or the rest (sending, in the undo window, waiting for approval, failed
+// this week), soonest first.
+func (m *Model) outboxItems(accs []string, kind string, scheduled bool) []store.OutboxItem {
 	items, _ := m.a.Store.Outbox(store.StatusApproval, store.StatusQueued, store.StatusSending, store.StatusFailed)
-	m.outboxRows = map[string]store.OutboxItem{}
-	var out []store.Thread
+	var out []store.OutboxItem
 	for _, it := range items {
-		if (len(accs) > 0 && !slices.Contains(accs, it.Account)) ||
+		isSched := it.Status == store.StatusQueued && it.Out.ScheduledFor > 0
+		if it.Kind != kind || isSched != scheduled || (len(accs) > 0 && !slices.Contains(accs, it.Account)) ||
 			it.Status == store.StatusFailed && time.Since(time.UnixMilli(it.Created)) > 7*24*time.Hour {
 			continue
 		}
+		out = append(out, it)
+	}
+	if scheduled {
+		sort.SliceStable(out, func(i, j int) bool { return out[i].SendAt < out[j].SendAt })
+	}
+	return out
+}
+
+func (m *Model) outboxThreads(items []store.OutboxItem) []store.Thread {
+	m.outboxRows = map[string]store.OutboxItem{}
+	var out []store.Thread
+	for _, it := range items {
 		id := fmt.Sprintf("%s%d", outboxPrefix, it.ID)
 		m.outboxRows[id] = it
 		subject := it.Out.Subject
@@ -395,7 +440,7 @@ func (m *Model) outboxThreads(accs []string) []store.Thread {
 }
 
 func (m *Model) curSpace() (store.Space, bool) {
-	if m.tab != tabChat || m.sel >= len(m.spaces) {
+	if m.tab != tabChat || m.sel >= len(m.spaces) || strings.HasPrefix(m.spaces[m.sel].Name, outboxPrefix) {
 		return store.Space{}, false
 	}
 	return m.spaces[m.sel], true
@@ -473,7 +518,7 @@ func (m *Model) sent(it store.OutboxItem) tea.Cmd {
 		return nil
 	}
 	if it.Out.ScheduledFor > 0 {
-		m.say("scheduled for " + app.SendTime(time.UnixMilli(it.Out.ScheduledFor), time.Now()) + " · in Sent: t moves it, z cancels")
+		m.say("scheduled for " + app.SendTime(time.UnixMilli(it.Out.ScheduledFor), time.Now()) + " · in Scheduled: t moves it, z cancels")
 		if !m.a.DaemonRunning() {
 			m.setErr("the background service isn't running, and it's what sends scheduled mail: sandesh service install")
 		}
@@ -1002,6 +1047,10 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 				m.mode = modeApprove
 				return m, nil
 			case store.StatusQueued, store.StatusFailed:
+				if it.Kind == "chat" {
+					m.replaceNext = it.ID
+					return m, m.editChat(it.Account, it.Out, 0)
+				}
 				if it.Kind == "mail" {
 					body, quoted := splitQuoted(it.Out.Body)
 					out := it.Out

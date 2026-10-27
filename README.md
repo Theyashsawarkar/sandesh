@@ -235,7 +235,7 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `L` | Add or remove a label (fzf picker) |
 | `x` | Select the thread for e / d / m / M |
 | `i` | Start typing a chat message right in the preview (Ctrl+t sends it later) |
-| `t` | Move a scheduled send to another time (in Sent; Enter edits it) |
+| `t` | Move a scheduled send to another time (in Scheduled; Enter edits it) |
 | `n` | Rename the chat (a space on Google Chat; a DM or group only here) |
 | `v` | Save the attachments to ~/Downloads/sandesh (picker when several) |
 | `V` | Open the attachments (saved to ~/Downloads/sandesh first) |
@@ -354,9 +354,10 @@ it: `tomorrow 9am`, `fri 6pm`, `in 2h`, `3 nov 10:30`, `03/11 9am`,
 message waits in sandesh's outbox and the background service sends it then
 (Gmail's API has no scheduled send of its own), so this computer must be on
 at that time: if it wasn't, the message goes out as soon as it is, and a
-notification says it went out late. Scheduled mail and messages sit at the
-top of **Sent** with their time: `t` moves one, Enter edits it, `z` cancels
-it. From the shell: `--at "tomorrow 9am"` on `mail send` and `chat send`;
+notification says it went out late. Scheduled mail is listed in its own
+**Scheduled** tab (next to Sent) and scheduled chat messages in the chat's
+**Scheduled** tab, soonest first, with their time: `t` moves one, Enter
+edits it, `z` cancels it. From the shell: `--at "tomorrow 9am"` on `mail send` and `chat send`;
 `sandesh outbox reschedule <id> <when>`. Agents can schedule too
 (`send_at`), still after your approval.
 
@@ -366,7 +367,7 @@ The **Sent** section (next to Starred) lists mail you sent with who it went
 to (`→ Priya, Arjun`) and whether they answered: `↩ Priya replied 09:58` or
 `no reply yet · 2d`. Mail still in the outbox sits on top: `sending in 7s`
 (`z` cancels), an agent's waiting for your OK (`A`), or `failed` in red (`R`
-sends it again).
+sends it again). Scheduled mail has its own tab, **Scheduled**.
 
 ## Older mail
 
