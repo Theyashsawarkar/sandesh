@@ -37,6 +37,7 @@ const (
 	modeRename  // typing a chat's new name
 	modePick    // the file picker
 	modeWhen    // picking when to send
+	modeConvo   // picking people for a new conversation
 	modeCompose // the compose screen
 	modeFind    // the search window
 )
@@ -121,6 +122,7 @@ type Model struct {
 	chatMsgLine   map[string]int // where each chat message starts in the preview
 	pick          *picker
 	when          *whenPicker
+	convo         *convoPicker
 	pickMode      mode   // where the picker goes back to
 	helpQ         string // filtering the keys popup
 	helpTop       int
@@ -747,6 +749,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case editedMsg:
 		return m.afterEdit(msg)
+	case convoDirTick:
+		if c := m.convo; c != nil && strings.TrimSpace(c.input.Value()) == msg.q {
+			a, acc := m.a, c.account
+			return m, func() tea.Msg {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				a.SearchDirectory(ctx, acc, msg.q)
+				return convoDirMsg{msg.q}
+			}
+		}
+		return m, nil
+	case convoDirMsg:
+		if c := m.convo; c != nil && strings.TrimSpace(c.input.Value()) == msg.q {
+			skip := map[string]bool{}
+			for _, p := range c.picked {
+				skip[p.key()] = true
+			}
+			c.sugg = m.people(c.account, msg.q, 7, skip)
+		}
+		return m, nil
+	case convoMsg:
+		return m.gotConvo(msg)
 	case pickerFilesMsg:
 		m.gotFiles(msg)
 		return m, nil
@@ -817,6 +841,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.mode == modeWhen && m.when != nil {
 		return m.whenKey(k)
+	}
+	if m.mode == modeConvo && m.convo != nil {
+		return m.convoKey(k)
 	}
 	// Ctrl+t while typing a chat message: send it later
 	if m.mode == modeChatMsg && s == "ctrl+t" {
@@ -1184,6 +1211,10 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 			}
 			m.olderN = sizes[max(0, i)]
 			m.say(fmt.Sprintf("older mail loads %d at a time", m.olderN))
+		}
+	case "N":
+		if m.tab == tabChat {
+			m.openConvo()
 		}
 	case "t":
 		if it, ok := m.curOutbox(); ok && it.Status == store.StatusQueued {

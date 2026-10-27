@@ -338,3 +338,41 @@ func TestScheduledChat(t *testing.T) {
 		t.Fatalf("z should cancel it: %s, %d rows", it.Status, len(m.spaces))
 	}
 }
+
+func TestNewConversation(t *testing.T) {
+	m := model(t)
+	m = press(m, "tab", "N")
+	if m.mode != modeConvo || !strings.Contains(m.View(), "new conversation") {
+		t.Fatal("N should open (and draw) the new conversation window")
+	}
+	m = typeText(m, "arj")
+	if len(m.convo.sugg) == 0 || m.convo.sugg[0].label() != "Arjun Mehta" {
+		t.Fatalf("people: %+v", m.convo.sugg)
+	}
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nm.(Model)
+	if cmd == nil {
+		t.Fatal("enter should open the conversation")
+	}
+	nm, _ = m.Update(cmd())
+	m = nm.(Model)
+	sp, ok := m.curSpace()
+	if !ok || sp.Type != "DIRECT_MESSAGE" || m.mode != modeChatMsg {
+		t.Fatalf("opened %+v ok=%v mode=%v err=%s", sp, ok, m.mode, m.err)
+	}
+	// search in chat finds people and conversations by name
+	m = press(m, "esc")
+	m.find = nil
+	m.sec = 0
+	m.reload()
+	m = press(m, "/")
+	m.find.scope = scopeAllChat
+	m = typeText(m, "priya")
+	m = runSearch(t, m)
+	if len(m.find.convos) == 0 || len(m.find.people) == 0 {
+		t.Fatalf("convos %d people %d", len(m.find.convos), len(m.find.people))
+	}
+	if !strings.Contains(m.View(), "PEOPLE") || !strings.Contains(m.View(), "CONVERSATIONS") {
+		t.Fatalf("groups missing:\n%s", m.View())
+	}
+}

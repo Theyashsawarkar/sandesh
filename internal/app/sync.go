@@ -514,28 +514,8 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 		var out []store.ChatMessage
 		var newest int64
 		for _, m := range msgs {
-			created := google.ParseTime(m.CreateTime).UnixMilli()
-			name := mime.Clean(m.Sender.DisplayName)
-			if name != "" {
-				// Chat names its senders: remember them for DM titles too
-				if known, _, ok := a.Store.User(acc.Name, m.Sender.Name); !ok || known != name {
-					_ = a.Store.PutUser(acc.Name, m.Sender.Name, name, "")
-				}
-			} else {
-				name = a.userName(ctx, c, acc.Name, m.Sender.Name)
-			}
-			cm := store.ChatMessage{Account: acc.Name, Name: m.Name, Space: gs.Name, Thread: m.Thread.Name, Sender: m.Sender.Name,
-				SenderName: name, Text: mime.Clean(m.Display()), Created: created}
-			for _, at := range m.Attachment {
-				f := store.ChatFile{Name: mime.Clean(at.ContentName), Type: at.ContentType}
-				if at.AttachmentDataRef != nil {
-					f.Ref = at.AttachmentDataRef.ResourceName
-				}
-				if at.DriveDataRef != nil {
-					f.Drive = at.DriveDataRef.DriveFileID
-				}
-				cm.Files = append(cm.Files, f)
-			}
+			cm := a.chatMessage(ctx, c, acc.Name, gs.Name, m)
+			created, name := cm.Created, cm.SenderName
 			out = append(out, cm)
 			if created > newest {
 				newest = created
@@ -593,6 +573,33 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 		return news, firstEr
 	}
 	return news, a.Store.SetChatSynced(acc.Name, me)
+}
+
+// chatMessage turns one of Chat's messages into the local copy's form,
+// learning the sender's name on the way.
+func (a *App) chatMessage(ctx context.Context, c *google.Client, account, space string, m google.ChatMsg) store.ChatMessage {
+	name := mime.Clean(m.Sender.DisplayName)
+	if name != "" {
+		// Chat names its senders: remember them for DM titles too
+		if known, _, ok := a.Store.User(account, m.Sender.Name); !ok || known != name {
+			_ = a.Store.PutUser(account, m.Sender.Name, name, "")
+		}
+	} else {
+		name = a.userName(ctx, c, account, m.Sender.Name)
+	}
+	cm := store.ChatMessage{Account: account, Name: m.Name, Space: space, Thread: m.Thread.Name, Sender: m.Sender.Name,
+		SenderName: name, Text: mime.Clean(m.Display()), Created: google.ParseTime(m.CreateTime).UnixMilli()}
+	for _, at := range m.Attachment {
+		f := store.ChatFile{Name: mime.Clean(at.ContentName), Type: at.ContentType}
+		if at.AttachmentDataRef != nil {
+			f.Ref = at.AttachmentDataRef.ResourceName
+		}
+		if at.DriveDataRef != nil {
+			f.Drive = at.DriveDataRef.DriveFileID
+		}
+		cm.Files = append(cm.Files, f)
+	}
+	return cm
 }
 
 // findMe intersects the members of a few DMs: the one user in all of them

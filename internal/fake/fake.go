@@ -393,6 +393,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		write(w, map[string]string{"id": id})
 
+	case p == "/chat/v1/spaces:findDirectMessage":
+		who := s.userID(q.Get("name"))
+		for _, sp := range s.Spaces {
+			if sp.Type == "DIRECT_MESSAGE" && has(sp.Members, who) {
+				write(w, map[string]any{"name": sp.Name, "spaceType": sp.Type})
+				return
+			}
+		}
+		fail(w, 404, "Direct message space not found.")
+	case p == "/chat/v1/spaces:setup":
+		spc, _ := body["space"].(map[string]any)
+		sp := &Space{Name: "spaces/new-" + s.id(), Type: fmt.Sprint(spc["spaceType"]), Members: []string{s.Me}}
+		ms, _ := body["memberships"].([]any)
+		for _, m := range ms {
+			mem, _ := m.(map[string]any)["member"].(map[string]any)
+			sp.Members = append(sp.Members, s.userID(fmt.Sprint(mem["name"])))
+		}
+		s.Spaces = append(s.Spaces, sp)
+		write(w, map[string]any{"name": sp.Name, "spaceType": sp.Type})
 	case p == "/chat/v1/spaces":
 		var out []any
 		for _, sp := range s.Spaces {
@@ -548,6 +567,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		fail(w, 404, "fake google has no "+r.Method+" "+p)
 	}
+}
+
+// userID turns users/{email} into users/{id} (Chat accepts either).
+func (s *Server) userID(u string) string {
+	email := strings.TrimPrefix(u, "users/")
+	for id, p := range s.People {
+		if strings.EqualFold(p[1], email) {
+			return id
+		}
+	}
+	return u
 }
 
 func (s *Server) space(name string) *Space {

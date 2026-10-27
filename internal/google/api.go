@@ -620,6 +620,30 @@ func (c *Client) Messages(ctx context.Context, space string, after time.Time, ma
 }
 
 // PostMessage sends text to a space; thread (a thread name) replies in it.
+// FindDM finds your direct message with a person: users/{id} or, signed in
+// as yourself, users/{email}. A 404 means there is none yet.
+func (c *Client) FindDM(ctx context.Context, user string) (ChatSpace, error) {
+	var sp ChatSpace
+	err := c.do(ctx, "GET", c.chat+"/spaces:findDirectMessage?name="+url.QueryEscape(user), nil, &sp)
+	return sp, err
+}
+
+// StartConversation creates a DM with one person, or a group chat with
+// several (users/{id} or users/{email}).
+func (c *Client) StartConversation(ctx context.Context, users []string) (ChatSpace, error) {
+	typ := "DIRECT_MESSAGE"
+	if len(users) > 1 {
+		typ = "GROUP_CHAT"
+	}
+	var members []map[string]any
+	for _, u := range users {
+		members = append(members, map[string]any{"member": map[string]string{"name": u, "type": "HUMAN"}})
+	}
+	var sp ChatSpace
+	err := c.do(ctx, "POST", c.chat+"/spaces:setup", map[string]any{"space": map[string]string{"spaceType": typ}, "memberships": members}, &sp)
+	return sp, err
+}
+
 // RenameSpace changes a named space's title on Google Chat (you must be
 // allowed to: usually a space manager).
 func (c *Client) RenameSpace(ctx context.Context, space, name string) error {

@@ -237,6 +237,7 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `i` | Start typing a chat message right in the preview (Ctrl+t sends it later) |
 | `t` | Move a scheduled send to another time (in Scheduled; Enter edits it) |
 | `n` | Rename the chat (a space on Google Chat; a DM or group only here) |
+| `N` | Start a conversation (opens the one you have with them, earlier messages and all) |
 | `v` | Save the attachments to ~/Downloads/sandesh (picker when several) |
 | `V` | Open the attachments (saved to ~/Downloads/sandesh first) |
 | `U` | Send a file into this chat space (upload; file picker with preview) |
@@ -271,6 +272,16 @@ home or Downloads, `Ctrl+h` shows hidden ones). Type to narrow it down; the
 right side previews the highlighted file: text with line numbers, an
 image's size (the picture itself with `chafa` installed), a PDF's first
 page (with `pdftotext`). `Tab` picks several, `Enter` adds them.
+
+**Starting a conversation** (`N` in chat): type a name and pick the
+person (people from chat, contacts from mail, and your Workspace
+directory); `Tab` adds another for a group chat. sandesh opens the DM you
+already have with them, fetching the earlier messages if this machine
+hasn't seen them, or starts a new one, and puts you in the message box.
+The chat search (`/`) finds conversations and people by name too, not just
+words in messages: Enter on a person opens your conversation with them.
+Claude can do the same: `chat_send` takes `to` (email addresses) instead of
+a space.
 
 **Renaming a chat** (`n`): a space is renamed on Google Chat, so everyone
 sees the new name (Google lets only its managers do it; sandesh asks for the

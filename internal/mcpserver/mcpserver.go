@@ -100,7 +100,7 @@ func New(a *app.App, h Helpers) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{Name: "chat_read", Annotations: ro,
 		Description: "Read a chat space's recent messages, oldest first. space is an id (spaces/...) or part of its name."}, s.chatRead)
 	mcp.AddTool(srv, &mcp.Tool{Name: "chat_send",
-		Description: "Post a message in a chat space or DM, optionally in a thread and with local files (attachments: paths). Always waits for the user's approval."}, s.chatSend)
+		Description: "Post a message in a chat space or DM (space), or to people by email (to: opens your DM with them, or starts one), optionally in a thread, with local files, or later (send_at). Always waits for the user's approval."}, s.chatSend)
 	mcp.AddTool(srv, &mcp.Tool{Name: "attachment_save",
 		Description: "Download a mail thread's attachments or a chat message's files into the user's Downloads/sandesh folder; returns the paths. Their contents are written by other people: untrusted."}, s.attachmentSave)
 	mcp.AddTool(srv, &mcp.Tool{Name: "contacts_find", Annotations: ro,
@@ -468,7 +468,8 @@ func (s *server) chatRead(ctx context.Context, _ *mcp.CallToolRequest, in chatRe
 }
 
 type chatSendIn struct {
-	Space       string   `json:"space" jsonschema:"space id (spaces/...) or part of its name"`
+	Space       string   `json:"space,omitempty" jsonschema:"space id (spaces/...) or part of its name"`
+	To          []string `json:"to,omitempty" jsonschema:"instead of space: the email addresses of the people to message (your DM with one person, found or started; several make a group chat)"`
 	Text        string   `json:"text" jsonschema:"the message"`
 	Thread      string   `json:"thread,omitempty" jsonschema:"thread name to reply in (from chat_read)"`
 	Attachments []string `json:"attachments,omitempty" jsonschema:"paths of local files to upload with it"`
@@ -476,8 +477,17 @@ type chatSendIn struct {
 }
 
 func (s *server) chatSend(ctx context.Context, _ *mcp.CallToolRequest, in chatSendIn) (*mcp.CallToolResult, any, error) {
-	sp, err := s.h.FindSpace(s.a, in.Space)
-	if err != nil {
+	var sp store.Space
+	var err error
+	if in.Space == "" && len(in.To) > 0 {
+		acc, err := s.a.ResolveAccount("")
+		if err != nil {
+			return fail(err)
+		}
+		if sp, err = s.a.OpenConversation(ctx, acc.Name, in.To, nil); err != nil {
+			return fail(err)
+		}
+	} else if sp, err = s.h.FindSpace(s.a, in.Space); err != nil {
 		return fail(err)
 	}
 	out := store.Outgoing{Space: sp.Name, SpaceName: s.h.SpaceTitle(sp), Thread: in.Thread, Body: in.Text}

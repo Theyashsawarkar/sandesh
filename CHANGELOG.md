@@ -4,6 +4,14 @@ Newest first.
 
 ## Unreleased
 
+- **Start a conversation (`N` in chat)**: pick people (from chat, mail
+  contacts and the Workspace directory); sandesh opens the DM you already
+  have with them (found on Google, earlier messages fetched) or starts one,
+  a group chat for several, and puts you in the message box.
+- **Chat search finds people and conversations**: CONVERSATIONS, PEOPLE and
+  MESSAGES groups; Enter on a person opens (or starts) your chat with them.
+- MCP `chat_send` takes `to` (email addresses) instead of a space.
+
 - **Scheduled tabs**: scheduled mail has its own **Scheduled** section next
   to Sent, and scheduled chat messages a **Scheduled** tab in chat, soonest
   first with their time and counts on the tabs (`t` moves, Enter edits, `z`

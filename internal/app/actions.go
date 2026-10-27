@@ -165,6 +165,76 @@ func (a *App) RenameSpace(ctx context.Context, account, space, name string) (onG
 	return true, a.Store.RenameSpace(account, space, name)
 }
 
+// OpenConversation opens your chat with these people: the DM you already
+// have with one person (found on Google even when it's not in the local
+// copy), else a new DM, or a new group chat for several. people are
+// users/{id} or email addresses; names (optional) title it until a sync
+// names it. Its recent messages are fetched, so the earlier conversation
+// is there at once.
+func (a *App) OpenConversation(ctx context.Context, account string, people, names []string) (store.Space, error) {
+	if len(people) == 0 {
+		return store.Space{}, errors.New("who with?")
+	}
+	c, err := a.Client(account)
+	if err != nil {
+		return store.Space{}, err
+	}
+	var users []string
+	for _, p := range people {
+		if !strings.HasPrefix(p, "users/") {
+			p = "users/" + strings.ToLower(strings.TrimSpace(p))
+		}
+		users = append(users, p)
+	}
+	var gs google.ChatSpace
+	if len(users) == 1 {
+		gs, err = c.FindDM(ctx, users[0])
+		if google.IsNotFound(err) {
+			gs, err = c.StartConversation(ctx, users)
+		}
+	} else {
+		gs, err = c.StartConversation(ctx, users)
+	}
+	switch {
+	case google.IsChatAppMissing(err):
+		return store.Space{}, errors.New("Google Chat isn't set up in your Cloud project (Chat API → Configuration)")
+	case google.IsMissingScope(err):
+		return store.Space{}, fmt.Errorf("starting chats needs one more Google permission: sign in again with `sandesh auth add %s`", account)
+	case err != nil:
+		return store.Space{}, err
+	}
+	sp := store.Space{Account: account, Name: gs.Name, DisplayName: mime.Clean(gs.DisplayName), Type: gs.SpaceType, LastActive: time.Now().UnixMilli()}
+	if prev, err := a.Store.Space(account, gs.Name); err == nil {
+		sp.LastActive = prev.LastActive
+	}
+	if err := a.Store.PutSpace(sp); err != nil {
+		return sp, err
+	}
+	if sp.DisplayName == "" && len(names) > 0 {
+		if prev, _ := a.Store.Space(account, gs.Name); prev.DisplayName == "" {
+			_ = a.Store.RenameSpace(account, gs.Name, strings.Join(names, ", "))
+		}
+	}
+	// the conversation so far
+	if msgs, err := c.Messages(ctx, gs.Name, time.Time{}, 50); err == nil {
+		var out []store.ChatMessage
+		var newest int64
+		for _, m := range msgs {
+			cm := a.chatMessage(ctx, c, account, gs.Name, m)
+			out = append(out, cm)
+			newest = max(newest, cm.Created)
+		}
+		_ = a.Store.PutChatMessages(out)
+		if newest > 0 {
+			_ = a.Store.SetSpaceSynced(account, gs.Name, newest)
+			if prev, err := a.Store.Space(account, gs.Name); err == nil && prev.LastRead < newest {
+				_ = a.Store.ForceSpaceRead(account, gs.Name, newest) // opening it reads it
+			}
+		}
+	}
+	return a.Store.Space(account, gs.Name)
+}
+
 // Retry sends a failed message again (straight away).
 func (a *App) Retry(id int64) error {
 	ok, err := a.Store.Transition(id, store.StatusFailed, store.StatusQueued, time.Now().UnixMilli())

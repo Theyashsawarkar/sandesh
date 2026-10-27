@@ -1076,6 +1076,30 @@ func (s *Store) ChatMessages(account, space string, limit int) ([]ChatMessage, e
 	return out, rows.Err()
 }
 
+// ChatUser is someone you've seen in chat.
+type ChatUser struct{ ID, Name, Email string }
+
+// ChatUsers finds people from chat by name or address.
+func (s *Store) ChatUsers(account, query string, limit int) ([]ChatUser, error) {
+	like := "%" + strings.ToLower(strings.TrimSpace(query)) + "%"
+	rows, err := s.db.Query(`SELECT u.id,u.name,u.email FROM users u JOIN accounts a ON a.name=u.account
+	  WHERE u.account=? AND u.id<>a.chat_user AND u.name<>'' AND (LOWER(u.name) LIKE ? OR LOWER(u.email) LIKE ?) ORDER BY u.name LIMIT ?`,
+		account, like, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ChatUser
+	for rows.Next() {
+		var u ChatUser
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) User(account, id string) (name, email string, ok bool) {
 	err := s.db.QueryRow(`SELECT name,email FROM users WHERE account=? AND id=?`, account, id).Scan(&name, &email)
 	return name, email, err == nil

@@ -43,6 +43,8 @@ type finder struct {
 	space      store.Space    // the chat you were in
 	seq        int            // bumped on every change; stale answers are dropped
 	mail       []findMail
+	convos     []store.Space // chats whose name matches
+	people     []person      // people to open a conversation with
 	chat       []store.ChatHit
 	sel        int
 	searching  bool
@@ -63,9 +65,11 @@ type (
 	findLocalTick  struct{ seq int }
 	findServerTick struct{ seq int }
 	findLocalMsg   struct {
-		seq  int
-		mail []findMail
-		chat []store.ChatHit
+		seq    int
+		mail   []findMail
+		convos []store.Space
+		people []person
+		chat   []store.ChatHit
 	}
 	findServerMsg struct {
 		seq int
@@ -107,7 +111,22 @@ func (f *finder) mailScope() bool { return f.scope == scopeSection || f.scope ==
 
 func (f *finder) query() string { return strings.TrimSpace(f.input.Value()) }
 
-func (f *finder) count() int { return len(f.mail) + len(f.chat) }
+func (f *finder) count() int { return len(f.mail) + len(f.convos) + len(f.people) + len(f.chat) }
+
+// at says what the i-th result is: mail, convo, person or chat, and its
+// index in that list.
+func (f *finder) at(i int) (string, int) {
+	for _, g := range []struct {
+		kind string
+		n    int
+	}{{"mail", len(f.mail)}, {"convo", len(f.convos)}, {"person", len(f.people)}, {"chat", len(f.chat)}} {
+		if i < g.n {
+			return g.kind, i
+		}
+		i -= g.n
+	}
+	return "", -1
+}
 
 func (f *finder) scopeName() string {
 	switch f.scope {
@@ -148,7 +167,7 @@ func (m *Model) findChanged() tea.Cmd {
 	}
 	f.serverBusy, f.serverErr = false, ""
 	if !searchable(f.query()) {
-		f.mail, f.chat, f.searching = nil, nil, false
+		f.mail, f.convos, f.people, f.chat, f.searching = nil, nil, nil, nil, false
 		return nil
 	}
 	f.searching = true
@@ -168,10 +187,13 @@ func (m *Model) findLocal(seq int) tea.Cmd {
 	}
 	a, q, scope, sec, space := m.a, f.query(), f.scope, f.section, f.space
 	accs := m.accountFilter()
+	mm := *m
 	return func() tea.Msg {
 		words := plainWords(q)
 		var mail []findMail
 		var chat []store.ChatHit
+		var convos []store.Space
+		var people []person
 		switch scope {
 		case scopeSection, scopeAllMail:
 			if words == "" {
@@ -198,8 +220,20 @@ func (m *Model) findLocal(seq int) tea.Cmd {
 			chat, _ = a.Store.SearchChat(nil, words, 80, space.Name)
 		default:
 			chat, _ = a.Store.SearchChat(accs, words, 80, "")
+			// conversations by name, and people to talk to
+			lw := strings.ToLower(words)
+			sps, _ := a.Store.Spaces(accs, nil)
+			for _, sp := range sps {
+				if len(convos) < 6 && strings.Contains(strings.ToLower(cli.SpaceTitle(sp)), lw) {
+					convos = append(convos, sp)
+				}
+			}
+			acc := mm.defaultAccount()
+			for _, p := range mm.people(acc, words, 5, nil) {
+				people = append(people, p)
+			}
 		}
-		return findLocalMsg{seq, mail, chat}
+		return findLocalMsg{seq: seq, mail: mail, convos: convos, people: people, chat: chat}
 	}
 }
 
@@ -220,7 +254,7 @@ func (m *Model) gotFindLocal(msg findLocalMsg) tea.Cmd {
 		}
 	}
 	sortMail(msg.mail)
-	f.mail, f.chat = msg.mail, msg.chat
+	f.mail, f.convos, f.people, f.chat = msg.mail, msg.convos, msg.people, msg.chat
 	f.sel = min(f.sel, max(0, f.count()-1))
 	return m.wantPreview()
 }
@@ -329,13 +363,52 @@ func (m *Model) wantPreview() tea.Cmd {
 			return findPreviewMsg{key, mm.mailLines(t, w)}
 		}
 	}
-	hit := f.chat[f.sel-len(f.mail)]
+	kind, i := f.at(f.sel)
+	mm := *m
+	s := m.styles
+	switch kind {
+	case "convo":
+		sp := f.convos[i]
+		key := "s/" + sp.Account + "/" + sp.Name
+		f.wantPrev = key
+		if _, ok := f.previews[key]; ok {
+			return nil
+		}
+		return func() tea.Msg {
+			msgs, _ := mm.a.Store.ChatMessages(sp.Account, sp.Name, 8)
+			out := []string{s.bold.Render(cli.SpaceTitle(sp)), s.muted.Render("the latest messages"), ""}
+			for j := len(msgs) - 1; j >= 0; j-- {
+				c := msgs[j]
+				name := c.SenderName
+				if c.Mine {
+					name = "You"
+				}
+				out = append(out, s.muted.Render("│ ")+s.bold.Render(name)+s.muted.Render(" "+cli.When(c.Created)))
+				for _, l := range wrap(mime.Clean(c.Text), w-3) {
+					out = append(out, s.muted.Render("│ ")+s.sub.Render(l))
+				}
+			}
+			return findPreviewMsg{key, append(out, "", s.muted.Render("enter opens it"))}
+		}
+	case "person":
+		p := f.people[i]
+		key := "p/" + p.key()
+		f.wantPrev = key
+		out := []string{m.avatar(p.label()) + " " + s.bold.Render(p.label())}
+		if p.Email != "" {
+			out = append(out, s.muted.Render("   "+p.Email))
+		}
+		out = append(out, "", s.text.Render("Enter opens your conversation with "+firstWord(p.label())+","),
+			s.text.Render("with what you said before, or starts one."))
+		f.previews[key] = out
+		return nil
+	}
+	hit := f.chat[i]
 	key := "c/" + hit.Name
 	f.wantPrev = key
 	if _, ok := f.previews[key]; ok {
 		return nil
 	}
-	mm := *m
 	words := strings.Fields(strings.ToLower(plainWords(f.query())))
 	return func() tea.Msg { return findPreviewMsg{key, mm.chatContext(hit, w, words)} }
 }
@@ -456,7 +529,16 @@ func (m Model) openFound() (tea.Model, tea.Cmd) {
 		m.say(fmt.Sprintf("%d found in %s · W saves it as a section · h/l leaves", len(f.mail), f.scopeName()))
 		return m, nil
 	}
-	hit := f.chat[f.sel-len(f.mail)]
+	kind, i := f.at(f.sel)
+	switch kind {
+	case "convo":
+		m.showSpace(f.convos[i])
+		return m, nil
+	case "person":
+		m.say("opening the conversation…")
+		return m, m.conversationCmd(m.defaultAccount(), []person{f.people[i]})
+	}
+	hit := f.chat[i]
 	m.tab = tabChat
 	m.search, m.filter = nil, ""
 	m.sec = 0 // All
@@ -625,8 +707,52 @@ func (m Model) findList(w int, q string) []string {
 		}
 		out = append(out, row(l1, right, w), ansi.Truncate(l2, w, "…"))
 	}
+	base := len(f.mail)
+	group := func(title string, n int) {
+		if n > 0 {
+			if len(out) > 0 {
+				out = append(out, "")
+			}
+			out = append(out, s.muted.Bold(true).Render(fmt.Sprintf(" %s · %d", title, n)))
+		}
+	}
+	group("CONVERSATIONS", len(f.convos))
+	for i, sp := range f.convos {
+		sel := base+i == f.sel
+		mark := "  "
+		if sel {
+			mark = s.accent.Bold(true).Render("▌ ")
+		}
+		pre := "# "
+		if sp.Type == "DIRECT_MESSAGE" {
+			pre = "@ "
+		}
+		l1 := mark + m.avatar(cli.SpaceTitle(sp)) + " " + s.muted.Render(pre) + hl(cli.SpaceTitle(sp), s.text)
+		if sel {
+			l1 += "\x00sel"
+		}
+		out = append(out, row(l1, s.muted.Render(cli.When(sp.LastActive)), w))
+	}
+	base += len(f.convos)
+	group("PEOPLE", len(f.people))
+	for i, p := range f.people {
+		sel := base+i == f.sel
+		mark := "  "
+		if sel {
+			mark = s.accent.Bold(true).Render("▌ ")
+		}
+		l1 := ansi.Truncate(mark+m.avatar(p.label())+" "+hl(p.label(), s.text)+"  "+s.muted.Render(p.Email), w, "…")
+		if sel {
+			l1 += "\x00sel"
+		}
+		out = append(out, l1)
+	}
+	base += len(f.people)
+	if len(f.chat) > 0 && (len(f.convos) > 0 || len(f.people) > 0) {
+		group("MESSAGES", len(f.chat))
+	}
 	for i, c := range f.chat {
-		sel := len(f.mail)+i == f.sel
+		sel := base+i == f.sel
 		mark := "  "
 		if sel {
 			mark = s.accent.Bold(true).Render("▌ ")

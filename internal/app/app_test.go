@@ -514,3 +514,45 @@ func TestScheduledSend(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOpenConversation(t *testing.T) {
+	a, g := setup(t)
+	ctx := context.Background()
+	if _, errs := a.SyncAll(ctx); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	// the DM you already have: found by address, with its messages
+	// as if the local copy had never seen it
+	_ = a.Store.RemoveAccount("work")
+	_ = a.Store.AddAccount(store.Account{Name: "work", Chat: true})
+	_ = a.Store.SetChatSynced("work", "users/1")
+	sp, err := a.OpenConversation(ctx, "work", []string{"priya.k@example.com"}, []string{"Priya Kulkarni"})
+	if err != nil || sp.Name != "spaces/dm-priya" {
+		t.Fatalf("existing dm: %+v %v", sp, err)
+	}
+	if msgs, _ := a.Store.ChatMessages("work", sp.Name, 0); len(msgs) == 0 {
+		t.Fatal("the earlier conversation should be fetched")
+	}
+	// someone you've never chatted with one to one: a new DM
+	n := len(g.Spaces)
+	sp, err = a.OpenConversation(ctx, "work", []string{"users/3"}, []string{"Arjun Mehta"})
+	if err != nil || len(g.Spaces) != n+1 || sp.Type != "DIRECT_MESSAGE" || cli0(sp) != "Arjun Mehta" {
+		t.Fatalf("new dm: %+v %v", sp, err)
+	}
+	// opening it again finds it, no second DM
+	if again, _ := a.OpenConversation(ctx, "work", []string{"users/3"}, nil); again.Name != sp.Name || len(g.Spaces) != n+1 {
+		t.Fatalf("second open made another: %+v", again)
+	}
+	// several people: a group chat
+	sp, err = a.OpenConversation(ctx, "work", []string{"users/3", "users/4"}, []string{"Arjun", "Neha"})
+	if err != nil || sp.Type != "GROUP_CHAT" {
+		t.Fatalf("group: %+v %v", sp, err)
+	}
+}
+
+func cli0(sp store.Space) string {
+	if sp.Alias != "" {
+		return sp.Alias
+	}
+	return sp.DisplayName
+}
