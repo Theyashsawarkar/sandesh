@@ -444,7 +444,7 @@ func (m Model) footerView() string {
 			keys = [][2]string{{"j/k", "move"}, {"h/l", "section"}, {"tab", "chat"}, {"⏎", "open"}, {"m/M", "read/unread"}, {"c", "compose"}, {"r", "reply"},
 				{"e", "archive"}, {"Q", "quoted"}, {"o", "link"}, {"@", "ask"}, {"?", "keys"}}
 		} else if m.pickingMsg() {
-			keys = [][2]string{{"j/k", "pick"}, {"r", "reply"}, {"e", "react"}, {"E", "edit"}, {"d", "delete"}, {"y", "copy"}, {"v", "files"}, {"[ ]", "chats"}, {"1", "list"}}
+			keys = [][2]string{{"j/k", "pick"}, {"⏎", "to the original"}, {"⌫", "back"}, {"r", "reply"}, {"e", "react"}, {"E", "edit"}, {"d", "delete"}, {"y", "copy"}, {"[ ]", "chats"}, {"1", "list"}}
 		} else {
 			keys = [][2]string{{"j/k", "move"}, {"h/l", "section"}, {"tab", "mail"}, {"⏎", "open"}, {"i", "type"}, {"r", "reply"}, {"N", "new chat"},
 				{"m/M", "read/unread"}, {"@", "ask"}, {"?", "keys"}}

@@ -132,6 +132,7 @@ type Model struct {
 	armDelete     string           // d pressed once on this message
 	reactSel      int              // the emoji picked in the reaction window
 	chatLimit     int              // how many messages of this chat to show (grows as older ones load)
+	jumpBack []string // replies you jumped from to their originals (Backspace goes back)
 	newLine       int              // where the "new" line is in the preview (0: none)
 	scrollToNew   bool
 	replyTo       *store.ChatMessage // the message the one being typed replies to
@@ -478,7 +479,7 @@ func (m *Model) loadPreview(reset bool) {
 	key := m.keyAt(m.sel)
 	if key != m.curKey {
 		reset = true
-		m.chatLimit, m.armDelete = 0, ""
+		m.chatLimit, m.armDelete, m.jumpBack = 0, "", nil
 	}
 	m.curKey = key
 	m.msgs, m.chatMsgs = nil, nil
@@ -548,6 +549,84 @@ func (m *Model) moveChatSel(step int) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// jumpToQuote picks the message the picked reply quotes (Enter again goes
+// further back); when it's older than what's loaded, earlier messages are
+// fetched until it turns up.
+func (m *Model) jumpToQuote() tea.Cmd {
+	c := m.chatMsgs[m.chatSel]
+	if c.Quoted == "" {
+		m.say("not a reply · Backspace goes back")
+		return nil
+	}
+	if m.selectChatMsg(c.Quoted) {
+		m.jumpBack = append(m.jumpBack, c.Name)
+		return nil
+	}
+	if m.loadingOlder {
+		return nil
+	}
+	// not loaded yet: fetch earlier messages until it's there
+	m.loadingOlder = true
+	m.say("looking for the original…")
+	a, sp, target, from, oldest := m.a, c.Space, c.Quoted, c.Name, m.chatMsgs[0].Created
+	acc := c.Account
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		total := 0
+		for range 10 {
+			if _, err := a.Store.ChatMessage(acc, target); err == nil {
+				return jumpMsg{target, from, total, nil}
+			}
+			n, err := a.LoadOlderChat(ctx, acc, sp, oldest, 100)
+			if err != nil || n == 0 {
+				return jumpMsg{"", from, total, err}
+			}
+			total += n
+			if t, err := a.Store.OldestChat(acc, sp); err == nil {
+				oldest = t
+			}
+		}
+		return jumpMsg{"", from, total, nil}
+	}
+}
+
+type jumpMsg struct {
+	target, from string
+	loaded       int
+	err          error
+}
+
+func (m Model) gotJump(msg jumpMsg) (tea.Model, tea.Cmd) {
+	m.loadingOlder = false
+	if msg.loaded > 0 {
+		m.chatLimit = len(m.chatMsgs) + msg.loaded
+		m.loadPreview(false)
+	}
+	switch {
+	case msg.err != nil:
+		m.setErr("the original: " + msg.err.Error())
+	case msg.target == "" || !m.selectChatMsg(msg.target):
+		m.say("the original isn't there any more (deleted, or from before you joined)")
+	default:
+		m.jumpBack = append(m.jumpBack, msg.from)
+	}
+	return m, nil
+}
+
+// selectChatMsg picks a message by name and scrolls to it.
+func (m *Model) selectChatMsg(name string) bool {
+	for i, c := range m.chatMsgs {
+		if c.Name == name {
+			m.chatSel = i
+			m.flashMsg = name
+			m.moveChatSel(0)
+			return true
+		}
+	}
+	return false
 }
 
 // replyTarget: the picked message, or else the latest one from someone else.
@@ -857,6 +936,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case convoMsg:
 		return m.gotConvo(msg)
+	case jumpMsg:
+		return m.gotJump(msg)
 	case olderChatMsg:
 		return m.gotOlderChat(msg)
 	case signedInMsg:
@@ -1196,6 +1277,9 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		m.chatSel = len(m.chatMsgs) - 1 // the latest message
 		m.fixView()
 	case "enter":
+		if m.pickingMsg() {
+			return m, m.jumpToQuote()
+		}
 		if it, ok := m.curOutbox(); ok {
 			// a mail or message still waiting: open it to change it
 			switch it.Status {
@@ -1378,6 +1462,13 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 	case "N":
 		if m.tab == tabChat {
 			m.openConvo()
+		}
+	case "backspace":
+		// back from an original to the reply you jumped from
+		if m.pickingMsg() && len(m.jumpBack) > 0 {
+			name := m.jumpBack[len(m.jumpBack)-1]
+			m.jumpBack = m.jumpBack[:len(m.jumpBack)-1]
+			m.selectChatMsg(name)
 		}
 	case "p":
 		if sp, ok := m.curSpace(); ok {

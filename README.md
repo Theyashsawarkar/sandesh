@@ -236,6 +236,8 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `x` | Select the thread for e / d / m / M |
 | `i` | Start typing a chat message right in the preview (Ctrl+t sends it later) |
 | `Enter` / `2` (chat) | Pick messages in the chat with j/k (k past the first loads earlier ones) |
+| `Enter` (picking) | Jump to the message a reply quotes (again goes further back) |
+| `Backspace` (picking) | Jump back to the reply you came from |
 | `e` (picking) | Add a reaction to the picked message (👍 ❤️ 😂 🎉 …; 1-0 picks) |
 | `E` (picking) | Edit your picked message in the message box |
 | `d d` (picking) | Delete your picked message, for everyone |
@@ -294,7 +296,10 @@ the conversation; `j` / `k` now pick a message (highlighted) instead of
 scrolling. `r` replies to the picked one: the message box shows "↩ replying
 to …", and the reply quotes it the way Google Chat's own reply does, right in
 the conversation. From the list, `r` replies
-to the latest message from someone else. Replies others send that quote a
+to the latest message from someone else. `Enter` on a reply jumps to the
+message it quotes (fetching earlier messages if it's older than what's
+shown); on a reply to a reply, Enter again keeps going back; `Backspace`
+retraces the way you came. Replies others send that quote a
 message show the quote above them (`❝ You: …`).
 
 **Starting a conversation** (`N` in chat): type a name and pick the

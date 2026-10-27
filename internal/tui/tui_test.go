@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"context"
 	"flag"
 	"net/http/httptest"
@@ -531,5 +532,42 @@ func TestChatExtras(t *testing.T) {
 	m = press(m, "]")
 	if m.sel != before+1 {
 		t.Fatal("] should go to the next chat")
+	}
+}
+
+func TestJumpToOriginal(t *testing.T) {
+	m := model(t)
+	g := lastFake
+	// a chain: A (old, not loaded yet) ← B quotes A ← C quotes B
+	g.AddChat(fake.ChatMessage{Name: "spaces/dm-priya/messages/A", Space: "spaces/dm-priya", Sender: "users/2", Text: "message A", Created: time.Now().AddDate(0, -2, 0)})
+	for i := 0; i < 230; i++ { // more than the 200 shown
+		g.AddChat(fake.ChatMessage{Space: "spaces/dm-priya", Sender: "users/2", Text: fmt.Sprintf("filler %d", i), Created: time.Now().AddDate(0, -1, 0).Add(time.Duration(i) * time.Minute)})
+	}
+	g.AddChat(fake.ChatMessage{Name: "spaces/dm-priya/messages/B", Space: "spaces/dm-priya", Sender: "users/1", Text: "message B", Created: time.Now().Add(-time.Minute), Quoted: "spaces/dm-priya/messages/A"})
+	g.AddChat(fake.ChatMessage{Name: "spaces/dm-priya/messages/C", Space: "spaces/dm-priya", Sender: "users/2", Text: "message C", Created: time.Now(), Quoted: "spaces/dm-priya/messages/B"})
+	m.a.SyncAll(context.Background())
+	m.reload()
+	m = press(m, "tab", "enter") // the DM, latest message (C) picked
+	if m.chatMsgs[m.chatSel].Text != "message C" {
+		t.Fatalf("picked %q", m.chatMsgs[m.chatSel].Text)
+	}
+	m = press(m, "enter") // C → B
+	if m.chatMsgs[m.chatSel].Text != "message B" {
+		t.Fatalf("after one jump: %q", m.chatMsgs[m.chatSel].Text)
+	}
+	// B → A, which isn't loaded: earlier messages come in until it is
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = runCmds(nm.(Model), cmd)
+	if m.chatMsgs[m.chatSel].Text != "message A" {
+		t.Fatalf("after the second jump: %q (%s)", m.chatMsgs[m.chatSel].Text, m.err)
+	}
+	// Backspace retraces: A → B → C
+	m = press(m, "backspace")
+	if m.chatMsgs[m.chatSel].Text != "message B" {
+		t.Fatalf("back once: %q", m.chatMsgs[m.chatSel].Text)
+	}
+	m = press(m, "backspace")
+	if m.chatMsgs[m.chatSel].Text != "message C" {
+		t.Fatalf("back twice: %q", m.chatMsgs[m.chatSel].Text)
 	}
 }

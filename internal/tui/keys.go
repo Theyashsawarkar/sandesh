@@ -44,6 +44,8 @@ var Keys = []Key{
 	{"Act", "x", "Select the thread for e / d / m / M"},
 	{"Act", "i", "Start typing a chat message right in the preview (Ctrl+t sends it later)"},
 	{"Act", "Enter / 2 (chat)", "Pick messages in the chat with j/k (k past the first loads earlier ones)"},
+	{"Act", "Enter (picking)", "Jump to the message a reply quotes (again goes further back)"},
+	{"Act", "Backspace (picking)", "Jump back to the reply you came from"},
 	{"Act", "e (picking)", "Add a reaction to the picked message (👍 ❤️ 😂 🎉 …; 1-0 picks)"},
 	{"Act", "E (picking)", "Edit your picked message in the message box"},
 	{"Act", "d d (picking)", "Delete your picked message, for everyone"},

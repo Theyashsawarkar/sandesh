@@ -980,6 +980,13 @@ func (s *Store) MentionCounts(account, name string) map[string]int {
 	return out
 }
 
+// OldestChat is when the oldest stored message of a chat was sent.
+func (s *Store) OldestChat(account, space string) (int64, error) {
+	var t sql.NullInt64
+	err := s.db.QueryRow(`SELECT MIN(created) FROM chat_messages WHERE account=? AND space=?`, account, space).Scan(&t)
+	return t.Int64, err
+}
+
 // SetPinned keeps a chat on top of the list (on this machine).
 func (s *Store) SetPinned(account, space string, on bool) error {
 	_, err := s.db.Exec(`UPDATE spaces SET pinned=? WHERE account=? AND name=?`, on, account, space)

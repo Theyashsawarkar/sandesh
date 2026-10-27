@@ -30,6 +30,8 @@
 # keybind: Tmux/sandesh | x | Select the thread for e / d / m / M
 # keybind: Tmux/sandesh | i | Start typing a chat message right in the preview (Ctrl+t sends it later)
 # keybind: Tmux/sandesh | Enter / 2 (chat) | Pick messages in the chat with j/k (k past the first loads earlier ones)
+# keybind: Tmux/sandesh | Enter (picking) | Jump to the message a reply quotes (again goes further back)
+# keybind: Tmux/sandesh | Backspace (picking) | Jump back to the reply you came from
 # keybind: Tmux/sandesh | e (picking) | Add a reaction to the picked message (👍 ❤️ 😂 🎉 …; 1-0 picks)
 # keybind: Tmux/sandesh | E (picking) | Edit your picked message in the message box
 # keybind: Tmux/sandesh | d d (picking) | Delete your picked message, for everyone

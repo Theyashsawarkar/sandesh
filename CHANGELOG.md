@@ -4,6 +4,10 @@ Newest first.
 
 ## Unreleased
 
+- **Jump to the original**: Enter on a picked reply jumps to the message it
+  quotes, loading earlier messages until it's there; Enter again follows the
+  chain further back, Backspace retraces it.
+
 - **Chat, redone as bubbles** (option A from the mockup): theirs left,
   yours right; quotes, files and numbered links inside the bubble;
   reactions underneath; "(edited)"; a red "new" line where unread starts
