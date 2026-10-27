@@ -45,9 +45,12 @@ func TestReadmeHasEveryKey(t *testing.T) {
 	}
 }
 
+var lastFake *fake.Server
+
 func model(t *testing.T) Model {
 	g := fake.New()
 	g.Seed()
+	lastFake = g
 	srv := httptest.NewServer(g)
 	t.Cleanup(srv.Close)
 	t.Setenv("SANDESH_GOOGLE_URL", srv.URL)
@@ -374,5 +377,54 @@ func TestNewConversation(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "PEOPLE") || !strings.Contains(m.View(), "CONVERSATIONS") {
 		t.Fatalf("groups missing:\n%s", m.View())
+	}
+}
+
+// runCmds runs a command and what follows from it, as the screen would.
+func runCmds(m Model, cmd tea.Cmd) Model {
+	for cmd != nil {
+		msg := cmd()
+		if b, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range b {
+				m = runCmds(m, c)
+			}
+			return m
+		}
+		if msg == nil {
+			return m
+		}
+		var nm tea.Model
+		nm, cmd = m.Update(msg)
+		m = nm.(Model)
+	}
+	return m
+}
+
+func TestGroupNameAndSignIn(t *testing.T) {
+	m := model(t)
+	g := lastFake
+	g.NeedsScope = true
+	m = press(m, "tab", "N")
+	m = typeText(m, "arj")
+	m = press(m, "tab")
+	m = typeText(m, "neh")
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nm.(Model)
+	if !m.convo.naming || !strings.Contains(m.View(), "Name") {
+		t.Fatal("two people: Enter should ask for a group name first")
+	}
+	m = typeText(m, "Release crew")
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = runCmds(nm.(Model), cmd)
+	if m.convo == nil || !m.convo.signIn || !strings.Contains(m.View(), "one more permission") {
+		t.Fatalf("the missing permission should ask to sign in again: %+v %s", m.convo, m.err)
+	}
+	// signing in again (the fake needs no browser), then it carries on
+	g.NeedsScope = false
+	nm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = runCmds(nm.(Model), cmd)
+	sp, ok := m.curSpace()
+	if !ok || sp.Type != "SPACE" || sp.DisplayName != "Release crew" || m.convo != nil {
+		t.Fatalf("named group: %+v ok=%v err=%s", sp, ok, m.err)
 	}
 }

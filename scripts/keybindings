@@ -30,7 +30,7 @@
 # keybind: Tmux/sandesh | x | Select the thread for e / d / m / M
 # keybind: Tmux/sandesh | i | Start typing a chat message right in the preview (Ctrl+t sends it later)
 # keybind: Tmux/sandesh | t | Move a scheduled send to another time (in Scheduled; Enter edits it)
-# keybind: Tmux/sandesh | n | Rename the chat (a space on Google Chat; a DM or group only here)
+# keybind: Tmux/sandesh | n | Rename the chat (spaces and groups on Google Chat; a DM only here)
 # keybind: Tmux/sandesh | N | Start a conversation (opens the one you have with them, earlier messages and all)
 # keybind: Tmux/sandesh | v | Save the attachments to ~/Downloads/sandesh (picker when several)
 # keybind: Tmux/sandesh | V | Open the attachments (saved to ~/Downloads/sandesh first)

@@ -484,7 +484,7 @@ func (s *server) chatSend(ctx context.Context, _ *mcp.CallToolRequest, in chatSe
 		if err != nil {
 			return fail(err)
 		}
-		if sp, err = s.a.OpenConversation(ctx, acc.Name, in.To, nil); err != nil {
+		if sp, err = s.a.OpenConversation(ctx, acc.Name, in.To, nil, ""); err != nil {
 			return fail(err)
 		}
 	} else if sp, err = s.h.FindSpace(s.a, in.Space); err != nil {

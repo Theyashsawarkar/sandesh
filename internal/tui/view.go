@@ -53,10 +53,13 @@ func (m Model) renamePrompt() string {
 	if !ok {
 		return "name: "
 	}
-	if sp.Type == "SPACE" {
+	switch sp.Type {
+	case "SPACE":
 		return "rename on Google Chat (everyone sees it): "
+	case "GROUP_CHAT":
+		return "name this group on Google Chat (everyone sees it; it becomes a space): "
 	}
-	return "name this chat (only here; empty: back to the default): "
+	return "name this DM (only here; empty: back to the default): "
 }
 
 func thousands(n int) string {

@@ -771,6 +771,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case convoMsg:
 		return m.gotConvo(msg)
+	case signedInMsg:
+		return m.gotSignedIn(msg)
+	case convoURLMsg:
+		if m.convo != nil {
+			m.convo.signURL = msg.url
+		}
+		return m, nil
 	case pickerFilesMsg:
 		m.gotFiles(msg)
 		return m, nil

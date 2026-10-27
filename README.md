@@ -236,7 +236,7 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `x` | Select the thread for e / d / m / M |
 | `i` | Start typing a chat message right in the preview (Ctrl+t sends it later) |
 | `t` | Move a scheduled send to another time (in Scheduled; Enter edits it) |
-| `n` | Rename the chat (a space on Google Chat; a DM or group only here) |
+| `n` | Rename the chat (spaces and groups on Google Chat; a DM only here) |
 | `N` | Start a conversation (opens the one you have with them, earlier messages and all) |
 | `v` | Save the attachments to ~/Downloads/sandesh (picker when several) |
 | `V` | Open the attachments (saved to ~/Downloads/sandesh first) |
@@ -275,7 +275,11 @@ page (with `pdftotext`). `Tab` picks several, `Enter` adds them.
 
 **Starting a conversation** (`N` in chat): type a name and pick the
 person (people from chat, contacts from mail, and your Workspace
-directory); `Tab` adds another for a group chat. sandesh opens the DM you
+directory); `Tab` adds another for a group. With two or more, Enter first
+asks for a name: with one the group is a named space everyone sees, without
+one a group chat (name it later with `n`). If your sign-in predates the
+permission starting chats needs, the window says so and Enter signs you in
+again in the browser, then carries on. sandesh opens the DM you
 already have with them, fetching the earlier messages if this machine
 hasn't seen them, or starts a new one, and puts you in the message box.
 The chat search (`/`) finds conversations and people by name too, not just
@@ -284,7 +288,8 @@ Claude can do the same: `chat_send` takes `to` (email addresses) instead of
 a space.
 
 **Renaming a chat** (`n`): a space is renamed on Google Chat, so everyone
-sees the new name (Google lets only its managers do it; sandesh asks for the
+sees the new name; a group chat gets its name on Google Chat too (that makes
+it a space, with the same people and messages) (Google lets only its managers do it; sandesh asks for the
 permission when you sign in, so an older sign-in needs `sandesh auth add
 <account>` once). DMs and unnamed group chats can't be named on Google;
 the name you give them stays on this machine. An empty name goes back to

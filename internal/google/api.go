@@ -630,17 +630,22 @@ func (c *Client) FindDM(ctx context.Context, user string) (ChatSpace, error) {
 
 // StartConversation creates a DM with one person, or a group chat with
 // several (users/{id} or users/{email}).
-func (c *Client) StartConversation(ctx context.Context, users []string) (ChatSpace, error) {
+func (c *Client) StartConversation(ctx context.Context, users []string, name string) (ChatSpace, error) {
 	typ := "DIRECT_MESSAGE"
 	if len(users) > 1 {
 		typ = "GROUP_CHAT"
+	}
+	space := map[string]string{"spaceType": typ}
+	if name != "" && len(users) > 1 {
+		// a named group is a space (group chats can't have names)
+		space = map[string]string{"spaceType": "SPACE", "displayName": name}
 	}
 	var members []map[string]any
 	for _, u := range users {
 		members = append(members, map[string]any{"member": map[string]string{"name": u, "type": "HUMAN"}})
 	}
 	var sp ChatSpace
-	err := c.do(ctx, "POST", c.chat+"/spaces:setup", map[string]any{"space": map[string]string{"spaceType": typ}, "memberships": members}, &sp)
+	err := c.do(ctx, "POST", c.chat+"/spaces:setup", map[string]any{"space": space, "memberships": members}, &sp)
 	return sp, err
 }
 
@@ -648,6 +653,13 @@ func (c *Client) StartConversation(ctx context.Context, users []string) (ChatSpa
 // allowed to: usually a space manager).
 func (c *Client) RenameSpace(ctx context.Context, space, name string) error {
 	return c.do(ctx, "PATCH", c.chat+"/"+space+"?updateMask=displayName", map[string]string{"displayName": name}, nil)
+}
+
+// NameGroup gives a group chat a name, which makes it a space (members and
+// messages stay); Google can't name a group chat otherwise.
+func (c *Client) NameGroup(ctx context.Context, space, name string) error {
+	return c.do(ctx, "PATCH", c.chat+"/"+space+"?updateMask=spaceType,displayName",
+		map[string]string{"spaceType": "SPACE", "displayName": name}, nil)
 }
 
 // IsMissingScope: the sign-in predates a permission sandesh now asks for.

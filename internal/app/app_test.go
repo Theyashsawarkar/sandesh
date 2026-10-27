@@ -454,6 +454,15 @@ func TestRenameSpace(t *testing.T) {
 			t.Fatalf("Google still says %q", sp.DisplayName)
 		}
 	}
+	// a group chat: named on Google, which makes it a space
+	g.Spaces = append(g.Spaces, &fake.Space{Name: "spaces/grp", Type: "GROUP_CHAT", Members: []string{"users/1", "users/3", "users/4"}})
+	_ = a.Store.PutSpace(store.Space{Account: "work", Name: "spaces/grp", Type: "GROUP_CHAT"})
+	if onGoogle, err := a.RenameSpace(ctx, "work", "spaces/grp", "Release crew"); err != nil || !onGoogle {
+		t.Fatalf("group: %v %v", onGoogle, err)
+	}
+	if sp, _ := a.Store.Space("work", "spaces/grp"); sp.Type != "SPACE" || sp.DisplayName != "Release crew" {
+		t.Fatalf("named group: %+v", sp)
+	}
 	// a DM: named on this machine only, and a sync keeps it
 	if onGoogle, err := a.RenameSpace(ctx, "work", "spaces/dm-priya", "Priya (release)"); err != nil || onGoogle {
 		t.Fatalf("dm: %v %v", onGoogle, err)
@@ -526,7 +535,7 @@ func TestOpenConversation(t *testing.T) {
 	_ = a.Store.RemoveAccount("work")
 	_ = a.Store.AddAccount(store.Account{Name: "work", Chat: true})
 	_ = a.Store.SetChatSynced("work", "users/1")
-	sp, err := a.OpenConversation(ctx, "work", []string{"priya.k@example.com"}, []string{"Priya Kulkarni"})
+	sp, err := a.OpenConversation(ctx, "work", []string{"priya.k@example.com"}, []string{"Priya Kulkarni"}, "")
 	if err != nil || sp.Name != "spaces/dm-priya" {
 		t.Fatalf("existing dm: %+v %v", sp, err)
 	}
@@ -535,18 +544,23 @@ func TestOpenConversation(t *testing.T) {
 	}
 	// someone you've never chatted with one to one: a new DM
 	n := len(g.Spaces)
-	sp, err = a.OpenConversation(ctx, "work", []string{"users/3"}, []string{"Arjun Mehta"})
+	sp, err = a.OpenConversation(ctx, "work", []string{"users/3"}, []string{"Arjun Mehta"}, "")
 	if err != nil || len(g.Spaces) != n+1 || sp.Type != "DIRECT_MESSAGE" || cli0(sp) != "Arjun Mehta" {
 		t.Fatalf("new dm: %+v %v", sp, err)
 	}
 	// opening it again finds it, no second DM
-	if again, _ := a.OpenConversation(ctx, "work", []string{"users/3"}, nil); again.Name != sp.Name || len(g.Spaces) != n+1 {
+	if again, _ := a.OpenConversation(ctx, "work", []string{"users/3"}, nil, ""); again.Name != sp.Name || len(g.Spaces) != n+1 {
 		t.Fatalf("second open made another: %+v", again)
 	}
 	// several people: a group chat
-	sp, err = a.OpenConversation(ctx, "work", []string{"users/3", "users/4"}, []string{"Arjun", "Neha"})
+	sp, err = a.OpenConversation(ctx, "work", []string{"users/3", "users/4"}, []string{"Arjun", "Neha"}, "")
 	if err != nil || sp.Type != "GROUP_CHAT" {
 		t.Fatalf("group: %+v %v", sp, err)
+	}
+	// with a name: a space, named on Google
+	sp, err = a.OpenConversation(ctx, "work", []string{"users/3", "users/4"}, nil, "Release crew")
+	if err != nil || sp.Type != "SPACE" || sp.DisplayName != "Release crew" {
+		t.Fatalf("named group: %+v %v", sp, err)
 	}
 }
 

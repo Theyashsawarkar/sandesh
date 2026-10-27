@@ -145,23 +145,30 @@ func (a *App) RenameSpace(ctx context.Context, account, space, name string) (onG
 		return false, err
 	}
 	name = strings.TrimSpace(mime.Clean(name))
-	if sp.Type != "SPACE" || name == "" {
+	if sp.Type == "DIRECT_MESSAGE" || name == "" {
 		return false, a.Store.SetAlias(account, space, name)
 	}
 	c, err := a.Client(account)
 	if err != nil {
 		return false, err
 	}
-	if err := c.RenameSpace(ctx, space, name); err != nil {
+	rename := c.RenameSpace
+	if sp.Type == "GROUP_CHAT" {
+		rename = c.NameGroup // naming it makes it a space
+	}
+	if err := rename(ctx, space, name); err != nil {
 		switch {
 		case google.IsMissingScope(err):
-			return false, fmt.Errorf("renaming spaces needs one more Google permission: sign in again with `sandesh auth add %s`", account)
+			return false, fmt.Errorf("%w: renaming spaces needs it (sign in again: sandesh auth add %s)", ErrNeedsSignIn, account)
 		case strings.Contains(err.Error(), "permission") || strings.Contains(err.Error(), "403"):
 			return false, fmt.Errorf("Google Chat says you can't rename this space (only its managers can)")
 		}
 		return false, err
 	}
 	_ = a.Store.SetAlias(account, space, "")
+	if sp.Type == "GROUP_CHAT" {
+		_ = a.Store.PutSpace(store.Space{Account: account, Name: space, DisplayName: name, Type: "SPACE", LastActive: sp.LastActive})
+	}
 	return true, a.Store.RenameSpace(account, space, name)
 }
 
@@ -171,7 +178,7 @@ func (a *App) RenameSpace(ctx context.Context, account, space, name string) (onG
 // users/{id} or email addresses; names (optional) title it until a sync
 // names it. Its recent messages are fetched, so the earlier conversation
 // is there at once.
-func (a *App) OpenConversation(ctx context.Context, account string, people, names []string) (store.Space, error) {
+func (a *App) OpenConversation(ctx context.Context, account string, people, names []string, groupName string) (store.Space, error) {
 	if len(people) == 0 {
 		return store.Space{}, errors.New("who with?")
 	}
@@ -190,18 +197,21 @@ func (a *App) OpenConversation(ctx context.Context, account string, people, name
 	if len(users) == 1 {
 		gs, err = c.FindDM(ctx, users[0])
 		if google.IsNotFound(err) {
-			gs, err = c.StartConversation(ctx, users)
+			gs, err = c.StartConversation(ctx, users, "")
 		}
 	} else {
-		gs, err = c.StartConversation(ctx, users)
+		gs, err = c.StartConversation(ctx, users, strings.TrimSpace(groupName))
 	}
 	switch {
 	case google.IsChatAppMissing(err):
 		return store.Space{}, errors.New("Google Chat isn't set up in your Cloud project (Chat API → Configuration)")
 	case google.IsMissingScope(err):
-		return store.Space{}, fmt.Errorf("starting chats needs one more Google permission: sign in again with `sandesh auth add %s`", account)
+		return store.Space{}, fmt.Errorf("%w: starting chats needs it", ErrNeedsSignIn)
 	case err != nil:
 		return store.Space{}, err
+	}
+	if gs.DisplayName == "" && len(users) > 1 {
+		gs.DisplayName = strings.TrimSpace(groupName)
 	}
 	sp := store.Space{Account: account, Name: gs.Name, DisplayName: mime.Clean(gs.DisplayName), Type: gs.SpaceType, LastActive: time.Now().UnixMilli()}
 	if prev, err := a.Store.Space(account, gs.Name); err == nil {
@@ -233,6 +243,20 @@ func (a *App) OpenConversation(ctx context.Context, account string, people, name
 		}
 	}
 	return a.Store.Space(account, gs.Name)
+}
+
+// ErrNeedsSignIn: Google wants a permission the account's sign-in doesn't
+// have (an older sign-in, before sandesh asked for it). Reauthorize fixes it.
+var ErrNeedsSignIn = errors.New("sandesh needs one more Google permission")
+
+// Reauthorize signs an account in again (the browser opens at say's URL),
+// with every permission sandesh asks for now. Nothing local is lost.
+func (a *App) Reauthorize(ctx context.Context, account string, say func(url string)) error {
+	acc, err := a.Store.Account(account)
+	if err != nil {
+		return err
+	}
+	return a.SignIn(ctx, acc.Name, acc.Email, acc.Chat, say)
 }
 
 // Retry sends a failed message again (straight away).

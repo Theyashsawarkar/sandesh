@@ -2,6 +2,9 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -10,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/Theyashsawarkar/sandesh/internal/app"
 	"github.com/Theyashsawarkar/sandesh/internal/store"
 )
 
@@ -73,22 +77,33 @@ type convoPicker struct {
 	sel     int
 	busy    bool
 	back    mode
+	name    textinput.Model // a group's name (optional)
+	naming  bool            // typing it
+	people  []person        // who the last try was with
+	signIn  bool            // Google wants a new sign-in first
+	signURL string          // where the browser went, in case it didn't open
+	named   bool            // the name step was offered
 }
 
 type (
 	convoDirTick struct{ q string }
 	convoDirMsg  struct{ q string }
 	convoMsg     struct {
-		sp  store.Space
-		err error
+		sp     store.Space
+		err    error
+		people []person
 	}
+	signedInMsg struct{ err error }
+	convoURLMsg struct{ url string }
 )
 
 func (m *Model) openConvo() {
 	in := newInput(m.styles)
 	in.Placeholder = "a name or an address"
 	in.Focus()
-	m.convo = &convoPicker{account: m.defaultAccount(), input: in, back: m.mode}
+	name := newInput(m.styles)
+	name.Placeholder = "optional: a name makes it a space everyone sees"
+	m.convo = &convoPicker{account: m.defaultAccount(), input: in, name: name, back: m.mode}
 	m.mode = modeConvo
 }
 
@@ -116,12 +131,21 @@ func (m *Model) startConvo(people []person) tea.Cmd {
 	if len(people) == 0 {
 		return nil
 	}
-	m.convo.busy = true
-	return m.conversationCmd(m.convo.account, people)
+	c := m.convo
+	c.busy, c.people = true, people
+	name := ""
+	if len(people) > 1 {
+		name = strings.TrimSpace(c.name.Value())
+	}
+	return m.conversationCmd(c.account, people, name)
 }
 
 // conversationCmd opens (or starts) the conversation in the background.
-func (m *Model) conversationCmd(acc string, people []person) tea.Cmd {
+func (m *Model) conversationCmd(acc string, people []person, groupName ...string) tea.Cmd {
+	gname := ""
+	if len(groupName) > 0 {
+		gname = groupName[0]
+	}
 	a := m.a
 	var ids, names []string
 	for _, p := range people {
@@ -140,9 +164,41 @@ func (m *Model) conversationCmd(acc string, people []person) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		sp, err := a.OpenConversation(ctx, acc, ids, names)
-		return convoMsg{sp, err}
+		sp, err := a.OpenConversation(ctx, acc, ids, names, gname)
+		return convoMsg{sp, err, people}
 	}
+}
+
+func clearInput(in textinput.Model) textinput.Model {
+	in.SetValue("")
+	return in
+}
+
+// signInAgain signs the account in again in the browser (for the
+// permission it lacks), then tries the conversation again.
+func (m *Model) signInAgain() tea.Cmd {
+	c := m.convo
+	c.busy = true
+	a, acc := m.a, c.account
+	urls := make(chan string, 1)
+	signIn := func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		err := a.Reauthorize(ctx, acc, func(u string) {
+			_ = exec.Command("xdg-open", u).Start()
+			urls <- u
+		})
+		close(urls)
+		return signedInMsg{err}
+	}
+	// the link, in case the browser didn't open
+	link := func() tea.Msg {
+		if u, ok := <-urls; ok {
+			return convoURLMsg{u}
+		}
+		return nil
+	}
+	return tea.Batch(signIn, link)
 }
 
 // openSpace shows a conversation, ready to type in it.
@@ -161,11 +217,36 @@ func (m *Model) showSpace(sp store.Space) {
 	m.fixView()
 }
 
+func (m Model) gotSignedIn(msg signedInMsg) (tea.Model, tea.Cmd) {
+	c := m.convo
+	if c == nil {
+		return m, nil
+	}
+	c.busy = false
+	if msg.err != nil {
+		m.setErr("sign-in: " + msg.err.Error())
+		return m, nil
+	}
+	c.signIn, c.signURL = false, ""
+	m.say("signed in again · opening the conversation")
+	return m, m.startConvo(c.people)
+}
+
 func (m Model) gotConvo(msg convoMsg) (tea.Model, tea.Cmd) {
 	if m.convo != nil {
 		m.convo.busy = false
 	}
 	if msg.err != nil {
+		if errors.Is(msg.err, app.ErrNeedsSignIn) {
+			if m.convo == nil { // from search: ask in the window
+				m.openConvo()
+			}
+			m.convo.signIn, m.convo.people = true, msg.people
+			if len(m.convo.picked) == 0 {
+				m.convo.picked = msg.people
+			}
+			return m, nil
+		}
 		m.setErr(msg.err.Error())
 		return m, nil
 	}
@@ -179,6 +260,29 @@ func (m Model) convoKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	c := m.convo
 	if c.busy {
 		return m, nil
+	}
+	if c.signIn {
+		switch k.String() {
+		case "enter":
+			return m, m.signInAgain()
+		case "esc", "ctrl+c":
+			c.signIn = false
+		}
+		return m, nil
+	}
+	if c.naming {
+		switch k.String() {
+		case "esc", "tab", "shift+tab", "up":
+			c.naming = false
+			c.name.Blur()
+			c.input.Focus()
+			return m, nil
+		case "enter", "ctrl+s":
+			return m, m.startConvo(c.picked)
+		}
+		var cmd tea.Cmd
+		c.name, cmd = c.name.Update(k)
+		return m, cmd
 	}
 	switch k.String() {
 	case "esc", "ctrl+c":
@@ -214,6 +318,15 @@ func (m Model) convoKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.say("no one by that name here; type their address, or pick from the list")
 				return m, nil
 			}
+			c.picked, c.input = people, clearInput(c.input)
+			c.sugg = nil
+		}
+		// two or more: a chance to name the group first
+		if len(people) > 1 && !c.named {
+			c.named, c.naming = true, true
+			c.input.Blur()
+			c.name.Focus()
+			return m, nil
 		}
 		return m, m.startConvo(people)
 	}
@@ -238,10 +351,34 @@ func (m Model) convoPopup() []string {
 	in := c.input
 	head := strings.Join(pills, " ")
 	in.Width = max(10, iw-lipgloss.Width(head)-6)
-	lines := []string{s.accent.Bold(true).Render(" ") + strings.TrimSpace(head+" "+in.View()), s.muted.Render(strings.Repeat("─", iw))}
+	lines := []string{s.accent.Bold(true).Render(" ") + strings.TrimSpace(head+" "+in.View())}
+	if len(c.picked) > 1 || c.naming {
+		label := s.muted.Render(" Name  ")
+		if c.naming {
+			label = s.accent.Bold(true).Render("▎Name  ")
+		}
+		nm := c.name
+		nm.Width = iw - 9
+		lines = append(lines, label+nm.View())
+	}
+	lines = append(lines, s.muted.Render(strings.Repeat("─", iw)))
 	switch {
+	case c.signIn && c.busy:
+		lines = append(lines, "", s.accent.Render(" ⟳ finish signing in in your browser…"))
+		if c.signURL != "" {
+			lines = append(lines, s.muted.Render(" (didn't open? "+ansi.Truncate(c.signURL, iw-18, "…")+")"))
+		}
+		lines = append(lines, "")
+	case c.signIn:
+		lines = append(lines, "", s.peach.Render(" Google wants one more permission before sandesh can start chats"),
+			s.muted.Render(" (your sign-in is from before sandesh asked for it)."), "",
+			s.text.Render(" Enter signs in again in your browser; then this chat opens."), "")
 	case c.busy:
 		lines = append(lines, "", s.accent.Render(" ⟳ opening the conversation…"), "")
+	case c.naming:
+		lines = append(lines, "", s.text.Render(fmt.Sprintf(" A group with %d people.", len(c.picked)+1)),
+			s.muted.Render(" With a name it's a space (you can rename it later with n);"),
+			s.muted.Render(" without one, a group chat. Enter starts it."), "")
 	case len(c.sugg) == 0 && strings.TrimSpace(c.input.Value()) == "":
 		lines = append(lines, "", s.muted.Render(" Who do you want to talk to? Your conversation with them opens,"),
 			s.muted.Render(" with what you said before; a new one starts if there is none."), "")
@@ -262,11 +399,15 @@ func (m Model) convoPopup() []string {
 			lines = append(lines, ansi.Truncate(mark+m.avatar(p.label())+" "+highlight(p.label(), []string{q}, nameS, s.accent.Bold(true))+"  "+where, iw, "…"))
 		}
 	}
-	verb := "enter opens the conversation"
-	if len(c.picked)+min(1, len(c.sugg)) > 1 {
-		verb = "enter starts a group chat"
+	keys := " ↑↓ pick · tab adds another person · enter opens the conversation · esc cancels"
+	switch {
+	case c.signIn:
+		keys = " enter signs in again · esc goes back"
+	case c.naming:
+		keys = " type a name (or none) · enter starts the group · tab back to people"
+	case len(c.picked)+min(1, len(c.sugg)) > 1:
+		keys = " ↑↓ pick · tab adds another person · enter: name the group, then start it · esc cancels"
 	}
-	lines = append(lines, s.muted.Render(strings.Repeat("─", iw)),
-		s.muted.Render(" ↑↓ pick · tab adds another person · "+verb+" · esc cancels"))
+	lines = append(lines, s.muted.Render(strings.Repeat("─", iw)), s.muted.Render(keys))
 	return m.popupFrame("new conversation", lines, w)
 }

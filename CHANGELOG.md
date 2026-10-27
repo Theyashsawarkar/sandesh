@@ -4,6 +4,13 @@ Newest first.
 
 ## Unreleased
 
+- **Name a group**: starting a chat with two or more people asks for a name
+  (named: a space; unnamed: a group chat), and `n` names an existing group
+  chat on Google Chat (it becomes a space, same people and messages).
+- **Sign in again without leaving**: when Google wants the newer permission
+  (starting chats, naming groups), the window says so and Enter signs in
+  again in the browser, then carries on with what you were doing.
+
 - **Start a conversation (`N` in chat)**: pick people (from chat, mail
   contacts and the Workspace directory); sandesh opens the DM you already
   have with them (found on Google, earlier messages fetched) or starts one,

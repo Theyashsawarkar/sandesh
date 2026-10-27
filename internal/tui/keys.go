@@ -44,7 +44,7 @@ var Keys = []Key{
 	{"Act", "x", "Select the thread for e / d / m / M"},
 	{"Act", "i", "Start typing a chat message right in the preview (Ctrl+t sends it later)"},
 	{"Act", "t", "Move a scheduled send to another time (in Scheduled; Enter edits it)"},
-	{"Act", "n", "Rename the chat (a space on Google Chat; a DM or group only here)"},
+	{"Act", "n", "Rename the chat (spaces and groups on Google Chat; a DM only here)"},
 	{"Act", "N", "Start a conversation (opens the one you have with them, earlier messages and all)"},
 	{"Act", "v", "Save the attachments to ~/Downloads/sandesh (picker when several)"},
 	{"Act", "V", "Open the attachments (saved to ~/Downloads/sandesh first)"},

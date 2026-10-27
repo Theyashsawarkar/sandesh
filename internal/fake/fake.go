@@ -65,6 +65,8 @@ type Server struct {
 	Sent     []string             // raw messages sent, decoded
 	Requests []string
 	uploads  map[string]File // chat media by resource name
+	// NeedsScope makes starting chats fail the way an old sign-in does
+	NeedsScope bool
 }
 
 func New() *Server {
@@ -402,16 +404,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		fail(w, 404, "Direct message space not found.")
+	case p == "/chat/v1/spaces:setup" && s.NeedsScope:
+		fail(w, 403, "Request had insufficient authentication scopes.")
 	case p == "/chat/v1/spaces:setup":
 		spc, _ := body["space"].(map[string]any)
 		sp := &Space{Name: "spaces/new-" + s.id(), Type: fmt.Sprint(spc["spaceType"]), Members: []string{s.Me}}
+		if n, ok := spc["displayName"].(string); ok {
+			sp.DisplayName = n
+		}
 		ms, _ := body["memberships"].([]any)
 		for _, m := range ms {
 			mem, _ := m.(map[string]any)["member"].(map[string]any)
 			sp.Members = append(sp.Members, s.userID(fmt.Sprint(mem["name"])))
 		}
 		s.Spaces = append(s.Spaces, sp)
-		write(w, map[string]any{"name": sp.Name, "spaceType": sp.Type})
+		write(w, map[string]any{"name": sp.Name, "spaceType": sp.Type, "displayName": sp.DisplayName})
 	case p == "/chat/v1/spaces":
 		var out []any
 		for _, sp := range s.Spaces {
@@ -437,6 +444,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sp.DisplayName = fmt.Sprint(body["displayName"])
+		if t, ok := body["spaceType"].(string); ok {
+			sp.Type = t
+		}
 		write(w, map[string]string{"name": sp.Name, "displayName": sp.DisplayName})
 	case strings.HasPrefix(p, "/chat/v1/spaces/") && strings.HasSuffix(p, "/members"):
 		sp := s.space(strings.TrimSuffix(strings.TrimPrefix(p, "/chat/v1/"), "/members"))
