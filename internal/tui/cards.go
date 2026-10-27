@@ -559,6 +559,15 @@ var reMention = regexp.MustCompile(`@[\p{L}\p{N}_.-]+`)
 // yours sit on the right with a green bar.
 func (m *Model) chatLines(w int) []string {
 	m.chatMsgLine = map[string]int{}
+	threaded := false
+	if sp, ok := m.curSpace(); ok {
+		threaded = sp.Threaded
+	}
+	byName := map[string]store.ChatMessage{}
+	for _, c := range m.chatMsgs {
+		byName[c.Name] = c
+	}
+	picking := m.pickingMsg()
 	s := m.styles
 	if len(m.chatMsgs) == 0 {
 		return []string{s.muted.Render("No recent messages synced.")}
@@ -612,11 +621,22 @@ func (m *Model) chatLines(w int) []string {
 		} else {
 			out = append(out, head)
 		}
-		for _, g := range m.chatMsgs[i:j] {
+		for k, g := range m.chatMsgs[i:j] {
 			m.chatMsgLine[g.Name] = len(out)
 			var lines []string
-			if first[g.Thread] != g.Name {
+			if threaded && first[g.Thread] != g.Name {
 				lines = append(lines, s.muted.Render("↳ reply in a thread"))
+			}
+			if g.Quoted != "" {
+				// a reply quoting another message, as Chat shows it
+				who, what := "", "a message"
+				if q, ok := byName[g.Quoted]; ok {
+					who, what = q.SenderName, oneLine(q.Text)
+					if q.Mine {
+						who = "You"
+					}
+				}
+				lines = append(lines, s.muted.Render("┊ ❝ ")+s.sub.Bold(true).Render(who)+" "+s.muted.Render(ansi.Truncate(what, bw-lipgloss.Width(who)-6, "…")))
 			}
 			for _, l := range wrap(mime.Clean(g.Text), bw-3) {
 				if strings.HasPrefix(l, "📎 ") {
@@ -628,13 +648,19 @@ func (m *Model) chatLines(w int) []string {
 			if len(g.Files) > 0 {
 				lines = append(lines, s.muted.Render("v saves · V opens"))
 			}
-			if first[g.Thread] == g.Name && threadCount[g.Thread] > 1 {
+			if threaded && first[g.Thread] == g.Name && threadCount[g.Thread] > 1 {
 				lines = append(lines, s.muted.Render(fmt.Sprintf("↳ %d %s in this thread", threadCount[g.Thread]-1,
 					map[bool]string{true: "reply", false: "replies"}[threadCount[g.Thread] == 2])))
 			}
 			gbar := bar
 			if g.Name == m.flashMsg {
 				gbar = s.accent.Bold(true).Render("▶") // the one search opened
+			}
+			if picking && i+k == m.chatSel {
+				gbar = s.accent.Bold(true).Render("▌") // the picked one: r replies to it
+				for x := range lines {
+					lines[x] = s.accent.Bold(true).Render(stripANSI(lines[x]))
+				}
 			}
 			for _, l := range lines {
 				if c.Mine {
@@ -711,6 +737,14 @@ func (m Model) previewBox(w, h int) string {
 	if _, ok := m.curSpace(); ok {
 		if m.mode == modeChatMsg {
 			bottom = []string{s.muted.Render(strings.Repeat("─", inner)), s.accent.Render("› ") + s.text.Render(string(m.input)) + s.accent.Render("▏")}
+			if r := m.replyTo; r != nil {
+				who := r.SenderName
+				if r.Mine {
+					who = "your message"
+				}
+				line := s.accent.Render("↩ replying to ") + s.bold.Render(who) + s.muted.Render(": "+oneLine(r.Text))
+				bottom = append([]string{bottom[0], ansi.Truncate(line, inner-12, "…") + s.muted.Render("  esc drops")}, bottom[1:]...)
+			}
 		} else {
 			bottom = []string{s.muted.Render(strings.Repeat("─", inner)), s.accent.Render("› ") + s.muted.Render("i types a message here · c writes it in your editor · r replies in the thread")}
 			if m.a.ChatAppMissing.Load() {

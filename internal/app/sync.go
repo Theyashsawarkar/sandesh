@@ -464,7 +464,8 @@ func (a *App) syncChat(ctx context.Context, c *google.Client, acc store.Account)
 		}
 		active := google.ParseTime(gs.LastActiveTime)
 		cached, known := cachedSpaces[gs.Name]
-		sp := store.Space{Account: acc.Name, Name: gs.Name, DisplayName: mime.Clean(gs.DisplayName), Type: gs.SpaceType, LastActive: active.UnixMilli()}
+		sp := store.Space{Account: acc.Name, Name: gs.Name, DisplayName: mime.Clean(gs.DisplayName), Type: gs.SpaceType, LastActive: active.UnixMilli(),
+			Threaded: gs.SpaceThreadState == "THREADED_MESSAGES"}
 		// a DM or group without a title: work one out, but a failed try
 		// waits 6 hours (each costs Google calls on every sync otherwise)
 		if sp.DisplayName == "" && (!known || cached.DisplayName == "" || strings.Contains(cached.DisplayName, "user ")) &&
@@ -589,6 +590,9 @@ func (a *App) chatMessage(ctx context.Context, c *google.Client, account, space 
 	}
 	cm := store.ChatMessage{Account: account, Name: m.Name, Space: space, Thread: m.Thread.Name, Sender: m.Sender.Name,
 		SenderName: name, Text: mime.Clean(m.Display()), Created: google.ParseTime(m.CreateTime).UnixMilli()}
+	if q := m.QuotedMessageMetadata; q != nil {
+		cm.Quoted = q.Name
+	}
 	for _, at := range m.Attachment {
 		f := store.ChatFile{Name: mime.Clean(at.ContentName), Type: at.ContentType}
 		if at.AttachmentDataRef != nil {

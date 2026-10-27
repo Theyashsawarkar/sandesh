@@ -437,9 +437,11 @@ func (m Model) footerView() string {
 		if m.tab == tabMail {
 			keys = [][2]string{{"j/k", "move"}, {"h/l", "section"}, {"tab", "chat"}, {"⏎", "open"}, {"m/M", "read/unread"}, {"c", "compose"}, {"r", "reply"},
 				{"e", "archive"}, {"Q", "quoted"}, {"o", "link"}, {"@", "ask"}, {"?", "keys"}}
+		} else if m.pickingMsg() {
+			keys = [][2]string{{"j/k", "pick a message"}, {"r", "reply to it"}, {"i", "new message"}, {"y", "copy it"}, {"v", "save its files"}, {"1", "back to the list"}}
 		} else {
-			keys = [][2]string{{"j/k", "move"}, {"h/l", "section"}, {"tab", "mail"}, {"⏎", "open"}, {"i", "type"}, {"c", "editor"}, {"r", "reply"},
-				{"m/M", "read/unread"}, {"@", "ask"}, {"S", "summary"}, {"?", "keys"}}
+			keys = [][2]string{{"j/k", "move"}, {"h/l", "section"}, {"tab", "mail"}, {"⏎", "open"}, {"i", "type"}, {"r", "reply"}, {"N", "new chat"},
+				{"m/M", "read/unread"}, {"@", "ask"}, {"?", "keys"}}
 		}
 	}
 	left := s.round(s.pill, modeName)

@@ -123,8 +123,10 @@ type Model struct {
 	pick          *picker
 	when          *whenPicker
 	convo         *convoPicker
-	pickMode      mode   // where the picker goes back to
-	helpQ         string // filtering the keys popup
+	chatSel       int                // the message picked in a chat (when the conversation has focus)
+	replyTo       *store.ChatMessage // the message the one being typed replies to
+	pickMode      mode               // where the picker goes back to
+	helpQ         string             // filtering the keys popup
 	helpTop       int
 	waiting       []store.OutboxItem
 	syncing       bool
@@ -486,6 +488,51 @@ func (m *Model) targets() []store.Thread {
 		}
 	}
 	return out
+}
+
+// pickingMsg: the conversation has focus, so j/k pick messages.
+func (m *Model) pickingMsg() bool {
+	_, ok := m.curSpace()
+	return ok && m.focus == 1 && len(m.chatMsgs) > 0
+}
+
+// moveChatSel picks another message and keeps it in view.
+func (m *Model) moveChatSel(step int) {
+	m.chatSel = max(0, min(len(m.chatMsgs)-1, m.chatSel+step))
+	m.fixView()
+	if line, ok := m.chatMsgLine[m.chatMsgs[m.chatSel].Name]; ok {
+		avail := m.bodyHeight() - 6
+		if line < m.scroll+1 || line > m.scroll+avail-3 {
+			m.scroll = max(0, line-avail/2)
+			m.fixView()
+		}
+	}
+}
+
+// replyTarget: the picked message, or else the latest one from someone else.
+func (m *Model) replyTarget() *store.ChatMessage {
+	if m.pickingMsg() && m.chatSel < len(m.chatMsgs) {
+		c := m.chatMsgs[m.chatSel]
+		return &c
+	}
+	for i := len(m.chatMsgs) - 1; i >= 0; i-- {
+		if !m.chatMsgs[i].Mine {
+			c := m.chatMsgs[i]
+			return &c
+		}
+	}
+	return nil
+}
+
+// quoteInto makes the message a reply to replyTo: quoting it, and in its
+// thread where the space uses threads.
+func (m *Model) quoteInto(out *store.Outgoing, sp store.Space) {
+	if r := m.replyTo; r != nil && r.Space == sp.Name {
+		out.Quote = r.Name
+		if sp.Threaded {
+			out.Thread = r.Thread
+		}
+	}
 }
 
 // recolour picks up a theme change (varna's palette, the config or its
@@ -887,6 +934,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) inputKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.Type {
 	case tea.KeyEsc:
+		m.replyTo = nil
 		if m.mode == modeFilter {
 			m.filter = ""
 			m.reload()
@@ -929,10 +977,13 @@ func (m Model) inputKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.aiDraft(text)
 		case modeChatMsg:
 			if sp, ok := m.curSpace(); ok && text != "" {
-				it, err := m.a.Queue(sp.Account, "chat", store.Outgoing{Space: sp.Name, SpaceName: cli.SpaceTitle(sp), Body: text}, app.OriginYou)
+				out := store.Outgoing{Space: sp.Name, SpaceName: cli.SpaceTitle(sp), Body: text}
+				m.quoteInto(&out, sp)
+				it, err := m.a.Queue(sp.Account, "chat", out, app.OriginYou)
 				if err != nil {
 					m.setErr(err.Error())
 				} else {
+					m.replyTo = nil
 					return m, m.sent(it)
 				}
 			}
@@ -1010,7 +1061,9 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 	case "?":
 		m.mode = modeHelp
 	case "j", "down":
-		if m.focus == 1 {
+		if m.pickingMsg() {
+			m.moveChatSel(1)
+		} else if m.focus == 1 {
 			m.scroll++
 		} else if m.tab == tabMail && m.sel >= m.count()-1 && m.count() > 0 {
 			return m, m.loadOlderCmd()
@@ -1020,7 +1073,9 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 			m.loadPreview(true)
 		}
 	case "k", "up":
-		if m.focus == 1 {
+		if m.pickingMsg() {
+			m.moveChatSel(-1)
+		} else if m.focus == 1 {
 			m.scroll = max(0, m.scroll-1)
 		} else if m.sel > 0 {
 			m.sel--
@@ -1028,14 +1083,18 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 			m.loadPreview(true)
 		}
 	case "g":
-		if m.focus == 1 {
+		if m.pickingMsg() {
+			m.moveChatSel(-len(m.chatMsgs))
+		} else if m.focus == 1 {
 			m.scroll = 0
 		} else {
 			m.sel = 0
 			m.loadPreview(true)
 		}
 	case "G":
-		if m.focus == 1 {
+		if m.pickingMsg() {
+			m.moveChatSel(len(m.chatMsgs))
+		} else if m.focus == 1 {
 			m.scroll = 1 << 30
 		} else {
 			m.sel = max(0, m.count()-1)
@@ -1073,6 +1132,8 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		m.focus = 0
 	case "2":
 		m.focus = 1
+		m.chatSel = len(m.chatMsgs) - 1 // the latest message
+		m.fixView()
 	case "enter":
 		if it, ok := m.curOutbox(); ok {
 			// a mail or message still waiting: open it to change it
@@ -1103,6 +1164,8 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.focus = 1
+		m.chatSel = len(m.chatMsgs) - 1 // in a chat: pick its latest message
+		m.fixView()
 		if t, ok := m.curThread(); ok && t.Unread() {
 			return m, m.act("", func(ctx context.Context) error { return m.a.MarkRead(ctx, t.Account, t.ID, true) })
 		}
@@ -1242,6 +1305,15 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 	case "c":
 		return m, m.compose()
 	case "r", "a", "f":
+		if m.tab == tabChat {
+			// reply to the picked message (or the latest from someone
+			// else), quoting it, right in the message box
+			if _, ok := m.curSpace(); ok && s == "r" {
+				m.replyTo = m.replyTarget()
+				m.mode, m.input = modeChatMsg, nil
+			}
+			return m, nil
+		}
 		return m, m.replyCmd(s)
 	case "L":
 		return m, m.labelCmd()
@@ -1265,7 +1337,9 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 			m.say("opened in the browser")
 		}
 	case "y":
-		if u := m.link(); u != "" {
+		if m.pickingMsg() {
+			m.say(copyText(m.chatMsgs[m.chatSel].Text))
+		} else if u := m.link(); u != "" {
 			m.say(copyText(u))
 		}
 	case "@":

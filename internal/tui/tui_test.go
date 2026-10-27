@@ -428,3 +428,41 @@ func TestGroupNameAndSignIn(t *testing.T) {
 		t.Fatalf("named group: %+v ok=%v err=%s", sp, ok, m.err)
 	}
 }
+
+func TestChatReplies(t *testing.T) {
+	m := model(t)
+	m = press(m, "tab") // chat, Priya's DM first
+	if sp, _ := m.curSpace(); sp.Name != "spaces/dm-priya" {
+		t.Fatalf("first chat: %s", sp.Name)
+	}
+	v := m.View()
+	// Priya's message quotes yours
+	if !strings.Contains(v, "❝") || !strings.Contains(v, "sent you the 3.8 notes") {
+		t.Fatalf("the quote isn't shown:\n%s", v)
+	}
+	// an unthreaded DM shows no thread labels
+	if strings.Contains(v, "reply in a thread") || strings.Contains(v, "in this thread") {
+		t.Fatal("thread labels in an unthreaded chat")
+	}
+	// pick your own message and reply to it
+	m = press(m, "enter") // focus the conversation: the latest message picked
+	if !m.pickingMsg() || m.chatSel != len(m.chatMsgs)-1 {
+		t.Fatalf("picking: %v sel %d", m.pickingMsg(), m.chatSel)
+	}
+	m = press(m, "k", "r")
+	if m.mode != modeChatMsg || m.replyTo == nil || m.replyTo.Text != "sent you the 3.8 notes" || !strings.Contains(m.View(), "replying to") {
+		t.Fatalf("reply to the picked message: %+v", m.replyTo)
+	}
+	m = typeText(m, "here they are")
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = runCmds(nm.(Model), cmd) // chat goes at once
+	sent := lastFake.Chat[len(lastFake.Chat)-1]
+	if sent.Text != "here they are" || sent.Quoted != "spaces/dm-priya/messages/m-notes" {
+		t.Fatalf("sent: %+v", sent)
+	}
+	// from the list, r replies to the latest message from someone else
+	m = press(m, "1", "r")
+	if m.replyTo == nil || m.replyTo.Mine {
+		t.Fatalf("list reply target: %+v", m.replyTo)
+	}
+}

@@ -4,6 +4,15 @@ Newest first.
 
 ## Unreleased
 
+- **Reply to a specific chat message**: Enter (or 2) on a chat lets j/k pick
+  messages; `r` replies to the picked one, quoting it like Google Chat
+  (quotedMessageMetadata), with "↩ replying to …" over the message box;
+  from the list `r` answers the latest message from someone else. `y`
+  copies and `v` saves the picked message.
+- **Quoted replies show**: a message that quotes another shows it above
+  (`❝ You: …`); recent chats are fetched again once to fill this in.
+- Thread labels ("reply in a thread") only in spaces that use threads.
+
 - **Name a group**: starting a chat with two or more people asks for a name
   (named: a space; unnamed: a group chat), and `n` names an existing group
   chat on Google Chat (it becomes a space, same people and messages).

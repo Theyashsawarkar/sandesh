@@ -563,6 +563,20 @@ type ChatMsg struct {
 	} `json:"thread"`
 	Attachment []ChatAttachment  `json:"attachment"`
 	CardsV2    []json.RawMessage `json:"cardsV2"`
+	// a reply that quotes another message
+	QuotedMessageMetadata *struct {
+		Name           string `json:"name"`
+		LastUpdateTime string `json:"lastUpdateTime"`
+	} `json:"quotedMessageMetadata,omitempty"`
+	LastUpdateTime string `json:"lastUpdateTime,omitempty"`
+}
+
+// GetChatMessage fetches one message (for its last update time, which a
+// quote needs).
+func (c *Client) GetChatMessage(ctx context.Context, name string) (ChatMsg, error) {
+	var m ChatMsg
+	err := c.do(ctx, "GET", c.chat+"/"+escapePath(name), nil, &m)
+	return m, err
 }
 
 // ChatAttachment is a file in a chat message: uploaded to Chat (a data
@@ -707,8 +721,21 @@ func escapePath(p string) string {
 	return strings.Join(parts, "/")
 }
 
-func (c *Client) PostMessage(ctx context.Context, space, text, thread string, files ...json.RawMessage) (string, error) {
+// PostMessage posts text (and files) in a space: in a thread when thread
+// is set, quoting another message when quote is (its name).
+func (c *Client) PostMessage(ctx context.Context, space, text, thread, quote string, files ...json.RawMessage) (string, error) {
 	body := map[string]any{"text": text}
+	if quote != "" {
+		q, err := c.GetChatMessage(ctx, quote)
+		if err != nil {
+			return "", fmt.Errorf("the message you reply to: %w", err)
+		}
+		at := q.LastUpdateTime
+		if at == "" {
+			at = q.CreateTime
+		}
+		body["quotedMessageMetadata"] = map[string]string{"name": quote, "lastUpdateTime": at}
+	}
 	if len(files) > 0 {
 		var atts []map[string]any
 		for _, f := range files {

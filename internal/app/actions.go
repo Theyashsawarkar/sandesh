@@ -213,7 +213,8 @@ func (a *App) OpenConversation(ctx context.Context, account string, people, name
 	if gs.DisplayName == "" && len(users) > 1 {
 		gs.DisplayName = strings.TrimSpace(groupName)
 	}
-	sp := store.Space{Account: account, Name: gs.Name, DisplayName: mime.Clean(gs.DisplayName), Type: gs.SpaceType, LastActive: time.Now().UnixMilli()}
+	sp := store.Space{Account: account, Name: gs.Name, DisplayName: mime.Clean(gs.DisplayName), Type: gs.SpaceType, LastActive: time.Now().UnixMilli(),
+		Threaded: gs.SpaceThreadState == "THREADED_MESSAGES"}
 	if prev, err := a.Store.Space(account, gs.Name); err == nil {
 		sp.LastActive = prev.LastActive
 	}

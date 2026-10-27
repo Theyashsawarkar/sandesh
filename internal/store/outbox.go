@@ -34,6 +34,7 @@ type Outgoing struct {
 	Space     string `json:"space,omitempty"`
 	SpaceName string `json:"space_name,omitempty"`
 	Thread    string `json:"thread,omitempty"`
+	Quote     string `json:"quote,omitempty"` // the message this one replies to (quoting it)
 	// both
 	Body  string `json:"body"`
 	Files []File `json:"files,omitempty"`

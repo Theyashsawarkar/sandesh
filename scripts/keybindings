@@ -18,7 +18,7 @@
 # keybind: Tmux/sandesh | X | Remove the current saved-search section
 # keybind: Tmux/sandesh | u | Switch account (all, then each one)
 # keybind: Tmux/sandesh | c | Create a new mail, or a new message in this space (compose)
-# keybind: Tmux/sandesh | r | Send a reply to the thread (in chat: in the latest thread)
+# keybind: Tmux/sandesh | r | Send a reply to the thread (in chat: to the picked message, quoting it)
 # keybind: Tmux/sandesh | a | Send a reply to everyone on the thread (reply all)
 # keybind: Tmux/sandesh | f | Send the thread on to someone else (forward)
 # keybind: Tmux/sandesh | e | Move the thread out of the inbox (archive; or every selected one)
@@ -29,6 +29,7 @@
 # keybind: Tmux/sandesh | L | Add or remove a label (fzf picker)
 # keybind: Tmux/sandesh | x | Select the thread for e / d / m / M
 # keybind: Tmux/sandesh | i | Start typing a chat message right in the preview (Ctrl+t sends it later)
+# keybind: Tmux/sandesh | Enter / 2 (chat) | Pick messages in the chat with j/k (r replies to one, y copies it, v saves its files)
 # keybind: Tmux/sandesh | t | Move a scheduled send to another time (in Scheduled; Enter edits it)
 # keybind: Tmux/sandesh | n | Rename the chat (spaces and groups on Google Chat; a DM only here)
 # keybind: Tmux/sandesh | N | Start a conversation (opens the one you have with them, earlier messages and all)

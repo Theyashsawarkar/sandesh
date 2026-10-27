@@ -43,12 +43,14 @@ type ChatMessage struct {
 	Name, Space, Thread, Sender, Text string
 	Files                             []File
 	Created                           time.Time
+	Quoted                            string // a reply's quoted message
 }
 
 type Space struct {
 	Name, DisplayName, Type string
 	Members                 []string
 	LastRead                time.Time
+	Threaded                bool
 }
 
 type Server struct {
@@ -422,7 +424,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case p == "/chat/v1/spaces":
 		var out []any
 		for _, sp := range s.Spaces {
-			out = append(out, map[string]any{"name": sp.Name, "displayName": sp.DisplayName, "spaceType": sp.Type,
+			threading := "UNTHREADED_MESSAGES"
+			if sp.Threaded {
+				threading = "THREADED_MESSAGES"
+			}
+			out = append(out, map[string]any{"name": sp.Name, "displayName": sp.DisplayName, "spaceType": sp.Type, "spaceThreadingState": threading,
 				"lastActiveTime": s.lastActive(sp.Name).UTC().Format(time.RFC3339Nano)})
 		}
 		write(w, map[string]any{"spaces": out})
@@ -437,6 +443,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			sp.LastRead, _ = time.Parse(time.RFC3339Nano, fmt.Sprint(body["lastReadTime"]))
 		}
 		write(w, map[string]string{"lastReadTime": sp.LastRead.UTC().Format(time.RFC3339Nano)})
+	case strings.HasPrefix(p, "/chat/v1/spaces/") && strings.Contains(p, "/messages/") && r.Method == "GET":
+		name := strings.TrimPrefix(p, "/chat/v1/")
+		for _, m := range s.Chat {
+			if m.Name == name {
+				write(w, s.chatJSON(m, nil))
+				return
+			}
+		}
+		fail(w, 404, "no such message")
 	case strings.HasPrefix(p, "/chat/v1/spaces/") && r.Method == "PATCH":
 		sp := s.space(strings.TrimPrefix(p, "/chat/v1/"))
 		if sp == nil {
@@ -501,6 +516,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.Method == "POST" {
 			m := &ChatMessage{Name: name + "/messages/" + s.id(), Space: name, Sender: s.Me, Text: fmt.Sprint(body["text"]), Created: time.Now()}
+			if q, ok := body["quotedMessageMetadata"].(map[string]any); ok {
+				m.Quoted = fmt.Sprint(q["name"])
+				if fmt.Sprint(q["lastUpdateTime"]) == "" {
+					fail(w, 400, "lastUpdateTime is required")
+					return
+				}
+			}
 			if atts, ok := body["attachment"].([]any); ok {
 				for _, a := range atts {
 					ref, _ := a.(map[string]any)["attachmentDataRef"].(map[string]any)
@@ -543,8 +565,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				atts = append(atts, map[string]any{"contentName": f.Name, "contentType": f.Type, "source": "UPLOADED_CONTENT",
 					"attachmentDataRef": map[string]string{"resourceName": ref}})
 			}
-			out = append(out, map[string]any{"name": m.Name, "text": m.Text, "createTime": m.Created.UTC().Format(time.RFC3339Nano),
-				"sender": map[string]string{"name": m.Sender, "type": "HUMAN"}, "thread": map[string]string{"name": m.Thread}, "attachment": atts})
+			out = append(out, s.chatJSON(m, atts))
 		}
 		write(w, map[string]any{"messages": out})
 	case p == "/gmail/v1/users/me/settings/sendAs":
@@ -577,6 +598,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		fail(w, 404, "fake google has no "+r.Method+" "+p)
 	}
+}
+
+func (s *Server) chatJSON(m *ChatMessage, atts []any) map[string]any {
+	j := map[string]any{"name": m.Name, "text": m.Text, "createTime": m.Created.UTC().Format(time.RFC3339Nano),
+		"sender": map[string]string{"name": m.Sender, "type": "HUMAN"}, "thread": map[string]string{"name": m.Thread}, "attachment": atts}
+	if m.Quoted != "" {
+		j["quotedMessageMetadata"] = map[string]string{"name": m.Quoted, "lastUpdateTime": m.Created.UTC().Format(time.RFC3339Nano)}
+	}
+	return j
 }
 
 // userID turns users/{email} into users/{id} (Chat accepts either).
@@ -673,12 +703,14 @@ func (s *Server) Seed() {
 <div class="gmail_quote">On Mon, 26 Oct, Arjun Mehta wrote:<blockquote>Cache fix is still in review, should land today.<br>If it slips, ship 3.8 without it and do 3.8.1 next week.</blockquote></div></div>`})
 
 	s.AddSpace(Space{Name: "spaces/dm-priya", Type: "DIRECT_MESSAGE", Members: []string{"users/1", "users/2"}, LastRead: now.Add(-48 * time.Hour)})
-	s.AddSpace(Space{Name: "spaces/portal-dev", DisplayName: "portal-dev", Type: "SPACE", Members: []string{"users/1", "users/3", "users/4"}, LastRead: now.Add(-48 * time.Hour)})
+	s.AddSpace(Space{Name: "spaces/portal-dev", DisplayName: "portal-dev", Type: "SPACE", Members: []string{"users/1", "users/3", "users/4"}, LastRead: now.Add(-48 * time.Hour), Threaded: true})
 	s.AddSpace(Space{Name: "spaces/all", DisplayName: "everyone", Type: "SPACE", Members: []string{"users/1", "users/4"}, LastRead: now})
 	s.AddChat(ChatMessage{Space: "spaces/all", Sender: "users/4", Text: "standup moved to 10:30 today", Created: today(8, 15)})
 	s.AddChat(ChatMessage{Space: "spaces/portal-dev", Sender: "users/3", Text: "deploy to staging done", Created: today(9, 28)})
 	s.AddChat(ChatMessage{Space: "spaces/portal-dev", Sender: "users/4", Text: "smoke tests green, report attached", Created: today(9, 29),
 		Files: []File{{Name: "smoke-report.txt", Type: "text/plain", Data: []byte("412 passed, 0 failed\n")}}})
 	s.AddChat(ChatMessage{Space: "spaces/portal-dev", Sender: "users/3", Text: "@You can you look at #412 before lunch?", Created: today(9, 30)})
-	s.AddChat(ChatMessage{Space: "spaces/dm-priya", Sender: "users/2", Text: "can you check my mail? need the release answer today", Created: today(9, 44)})
+	s.AddChat(ChatMessage{Name: "spaces/dm-priya/messages/m-notes", Space: "spaces/dm-priya", Sender: "users/1", Text: "sent you the 3.8 notes", Created: today(9, 40)})
+	s.AddChat(ChatMessage{Space: "spaces/dm-priya", Sender: "users/2", Text: "can you check my mail? need the release answer today", Created: today(9, 44),
+		Quoted: "spaces/dm-priya/messages/m-notes"})
 }

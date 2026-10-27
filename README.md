@@ -224,7 +224,7 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | Key | Does |
 |---|---|
 | `c` | Create a new mail, or a new message in this space (compose) |
-| `r` | Send a reply to the thread (in chat: in the latest thread) |
+| `r` | Send a reply to the thread (in chat: to the picked message, quoting it) |
 | `a` | Send a reply to everyone on the thread (reply all) |
 | `f` | Send the thread on to someone else (forward) |
 | `e` | Move the thread out of the inbox (archive; or every selected one) |
@@ -235,6 +235,7 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `L` | Add or remove a label (fzf picker) |
 | `x` | Select the thread for e / d / m / M |
 | `i` | Start typing a chat message right in the preview (Ctrl+t sends it later) |
+| `Enter` / `2` (chat) | Pick messages in the chat with j/k (r replies to one, y copies it, v saves its files) |
 | `t` | Move a scheduled send to another time (in Scheduled; Enter edits it) |
 | `n` | Rename the chat (spaces and groups on Google Chat; a DM only here) |
 | `N` | Start a conversation (opens the one you have with them, earlier messages and all) |
@@ -272,6 +273,15 @@ home or Downloads, `Ctrl+h` shows hidden ones). Type to narrow it down; the
 right side previews the highlighted file: text with line numbers, an
 image's size (the picture itself with `chafa` installed), a PDF's first
 page (with `pdftotext`). `Tab` picks several, `Enter` adds them.
+
+**Replying to a message in chat**: `Enter` (or `2`) on a chat moves into
+the conversation; `j` / `k` now pick a message (highlighted) instead of
+scrolling. `r` replies to the picked one: the message box shows "↩ replying
+to …", and the reply quotes it the way Google Chat does (in a threaded
+space it also goes into that message's thread). From the list, `r` replies
+to the latest message from someone else. Replies others send that quote a
+message show the quote above them (`❝ You: …`). "Reply in a thread" labels
+only appear in spaces that use threads.
 
 **Starting a conversation** (`N` in chat): type a name and pick the
 person (people from chat, contacts from mail, and your Workspace

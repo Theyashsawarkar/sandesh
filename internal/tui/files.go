@@ -42,6 +42,9 @@ func (m *Model) savables() []savable {
 	}
 	for j := len(m.chatMsgs) - 1; j >= 0; j-- { // newest first
 		cm := m.chatMsgs[j]
+		if m.pickingMsg() && j != m.chatSel {
+			continue // the picked message's files only
+		}
 		for i, f := range cm.Files {
 			cm, i := cm, i
 			where := "Drive: opens in Chat (b)"

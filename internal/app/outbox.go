@@ -283,7 +283,7 @@ func (a *App) deliver(ctx context.Context, it store.OutboxItem) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		name, err := c.PostMessage(ctx, out.Space, out.Body, out.Thread, refs...)
+		name, err := c.PostMessage(ctx, out.Space, out.Body, out.Thread, out.Quote, refs...)
 		if err != nil {
 			return "", err
 		}
@@ -299,7 +299,7 @@ func (a *App) deliver(ctx context.Context, it store.OutboxItem) (string, error) 
 				files = append(files, store.ChatFile{Name: f.Name, Type: f.Type})
 			}
 			_ = a.Store.PutChatMessages([]store.ChatMessage{{Account: it.Account, Name: name, Space: out.Space, Thread: out.Thread,
-				Sender: acc.ChatUser, SenderName: "You", Text: text, Created: time.Now().UnixMilli(), Files: files}})
+				Sender: acc.ChatUser, SenderName: "You", Text: text, Created: time.Now().UnixMilli(), Files: files, Quoted: out.Quote}})
 			_ = a.Store.SetSpaceRead(it.Account, out.Space, time.Now().UnixMilli())
 		}
 		return name, nil

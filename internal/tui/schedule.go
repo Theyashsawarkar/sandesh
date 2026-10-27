@@ -126,7 +126,10 @@ func (m Model) scheduleAt(w *whenPicker, t time.Time) (tea.Model, tea.Cmd) {
 		if !ok || strings.TrimSpace(w.text) == "" {
 			return m, nil
 		}
-		it, err := m.a.Queue(sp.Account, "chat", store.Outgoing{Space: sp.Name, SpaceName: cli.SpaceTitle(sp), Body: w.text, ScheduledFor: t.UnixMilli()}, app.OriginYou)
+		out := store.Outgoing{Space: sp.Name, SpaceName: cli.SpaceTitle(sp), Body: w.text, ScheduledFor: t.UnixMilli()}
+		m.quoteInto(&out, sp)
+		m.replyTo = nil
+		it, err := m.a.Queue(sp.Account, "chat", out, app.OriginYou)
 		if err != nil {
 			m.setErr(err.Error())
 			return m, nil
