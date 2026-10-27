@@ -155,6 +155,10 @@ func New(a *app.App, launch string) Model {
 		expanded: map[string]bool{}}
 	m.sections = a.Sections()
 	m.accounts = a.AccountNames()
+	// sandesh --tab chat (a status bar's chat capsule) opens on chat
+	if os.Getenv("SANDESH_TAB") == "chat" {
+		m.tab = tabChat
+	}
 	m.reload()
 	return m
 }

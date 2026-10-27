@@ -519,6 +519,7 @@ Every command has `--help`; the read commands take `--json`.
 | Command | Does |
 |---|---|
 | `sandesh` | The screen |
+| `sandesh --tab chat` | The screen, opened on the chat tab (`--tab mail` is the default); also with `--popup` |
 | `sandesh mail list [--today] [--unread] [--section S]` | Threads (`ls`) |
 | `sandesh mail read <thread> [--mark-read]` | A whole thread as text |
 | `sandesh mail search <query> [--local]` | Gmail search syntax; `--local` searches the local copy |

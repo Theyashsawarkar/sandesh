@@ -27,7 +27,7 @@ import (
 const usage = `sandesh -- Gmail and Google Chat in the terminal
 
 Usage:
-  sandesh                          open the screen
+  sandesh                          open the screen (--tab chat: on chat)
   sandesh mail list [flags]        threads (--today --unread --section NAME --json)
   sandesh mail read <thread>       a whole thread as text (--json, --mark-read)
   sandesh mail search <query>      Gmail search (--local: the local copy only)
@@ -71,6 +71,17 @@ func Run(args []string, tui func(*app.App, string) error) int {
 			return check(demo(nil, tui))
 		}
 		return code
+	}
+	// --tab mail|chat, anywhere before the command: the tab the screen opens on
+	for i := 0; i+1 < len(args) && strings.HasPrefix(args[i], "-"); i++ {
+		if args[i] == "--tab" {
+			if t := args[i+1]; t != "mail" && t != "chat" {
+				return check(usageError("--tab is mail or chat, not %q", t))
+			}
+			os.Setenv("SANDESH_TAB", args[i+1])
+			args = append(args[:i:i], args[i+2:]...)
+			break
+		}
 	}
 	if len(args) == 0 {
 		return screen("")

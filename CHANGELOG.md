@@ -4,6 +4,10 @@ Newest first.
 
 ## Unreleased
 
+- **`--tab chat`**: `sandesh --tab chat` (and `sandesh --popup --tab chat`)
+  opens the screen on the chat tab, so a status bar's chat count can open
+  chat and its mail count mail.
+
 - **`v` opens files**: an attachment or chat file opens in the app your
   desktop uses for it (kept in ~/Downloads/sandesh); `V` only saves.
 
