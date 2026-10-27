@@ -248,8 +248,8 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `t` | Move a scheduled send to another time (in Scheduled; Enter edits it) |
 | `n` | Rename the chat (spaces and groups on Google Chat; a DM only here) |
 | `N` | Start a conversation (opens the one you have with them, earlier messages and all) |
-| `v` | Save the attachments to ~/Downloads/sandesh (picker when several) |
-| `V` | Open the attachments (saved to ~/Downloads/sandesh first) |
+| `v` | Open the attachments in their apps (kept in ~/Downloads/sandesh; picker when several) |
+| `V` | Save the attachments to ~/Downloads/sandesh without opening them |
 | `U` | Send a file into this chat space (upload; file picker with preview) |
 | `z` | Cancel the last change, or a send in its undo window (undo) |
 | `A` | Show the sends an agent is waiting on you to approve |
@@ -285,7 +285,7 @@ page (with `pdftotext`). `Tab` picks several, `Enter` adds them.
 
 **The conversation** is drawn as bubbles: theirs on the left under their
 name, yours on the right in the accent colour, a reply's quote inside its
-bubble, files and numbered links (`o` opens one) inside too, reactions as
+bubble, files (`v` opens one) and numbered links (`o` opens one) inside too, reactions as
 chips underneath and "(edited)" where a message was changed. A red **new**
 line marks where what you haven't read starts, and the chat opens there.
 The top line lists who's in it. The chat list is grouped (pinned, today,
@@ -426,9 +426,10 @@ threads a minute, with a progress bar in the top bar.
 
 ## Files
 
-- **Download**: `v` saves a mail's attachments or a chat's files to
-  `~/Downloads/sandesh` (`SANDESH_DOWNLOADS` moves it); with several, an fzf
-  picker opens (Tab picks more, Ctrl+a all). `V` saves and opens them. It
+- **Open and download**: `v` opens a mail's attachments or a chat's files
+  in the app your desktop uses for them (they're kept in
+  `~/Downloads/sandesh`; `SANDESH_DOWNLOADS` moves it); with several, a
+  picker opens (Tab picks more, Ctrl+a all). `V` only saves them. It
   never overwrites: a second copy is `name (2).ext`. Chat files kept in
   Drive open in the browser instead (`b`). From the shell: `sandesh mail
   save THREAD [N|all]`, `sandesh chat save MESSAGE [N|all]`.

@@ -4,6 +4,9 @@ Newest first.
 
 ## Unreleased
 
+- **`v` opens files**: an attachment or chat file opens in the app your
+  desktop uses for it (kept in ~/Downloads/sandesh); `V` only saves.
+
 - **Take a reaction back**: in the reaction window (`e`), the ones you
   added are marked ✓, and picking one removes it.
 

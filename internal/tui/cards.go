@@ -486,7 +486,7 @@ func (m *Model) mailLines(t store.Thread, w int) []string {
 			for _, at := range msg.Attachments {
 				lines = append(lines, s.peach.Render("📎 "+at.Name)+s.muted.Render(" · "+sizeOf(at.Size)))
 			}
-			lines = append(lines, s.muted.Render("   v saves · V opens"))
+			lines = append(lines, s.muted.Render("   v opens · V saves"))
 		}
 		if len(res.Links) > 0 {
 			lines = append(lines, "")
@@ -685,7 +685,7 @@ func (m *Model) chatLines(w int) []string {
 				lines[len(lines)-1] += s.muted.Render(" (edited)")
 			}
 			for _, f := range files {
-				lines = append(lines, "📎 "+s.peach.Render(ansi.Truncate(f, bw-16, "…"))+s.muted.Render(" · v saves"))
+				lines = append(lines, "📎 "+s.peach.Render(ansi.Truncate(f, bw-16, "…"))+s.muted.Render(" · v opens"))
 			}
 			if len(lines) == 0 {
 				lines = []string{s.muted.Render("…")}

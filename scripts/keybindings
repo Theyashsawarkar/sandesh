@@ -42,8 +42,8 @@
 # keybind: Tmux/sandesh | t | Move a scheduled send to another time (in Scheduled; Enter edits it)
 # keybind: Tmux/sandesh | n | Rename the chat (spaces and groups on Google Chat; a DM only here)
 # keybind: Tmux/sandesh | N | Start a conversation (opens the one you have with them, earlier messages and all)
-# keybind: Tmux/sandesh | v | Save the attachments to ~/Downloads/sandesh (picker when several)
-# keybind: Tmux/sandesh | V | Open the attachments (saved to ~/Downloads/sandesh first)
+# keybind: Tmux/sandesh | v | Open the attachments in their apps (kept in ~/Downloads/sandesh; picker when several)
+# keybind: Tmux/sandesh | V | Save the attachments to ~/Downloads/sandesh without opening them
 # keybind: Tmux/sandesh | U | Send a file into this chat space (upload; file picker with preview)
 # keybind: Tmux/sandesh | z | Cancel the last change, or a send in its undo window (undo)
 # keybind: Tmux/sandesh | A | Show the sends an agent is waiting on you to approve

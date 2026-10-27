@@ -1533,7 +1533,7 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 	case "L":
 		return m, m.labelCmd()
 	case "v", "V":
-		return m, m.saveCmd(s == "V")
+		return m, m.saveCmd(s == "v") // v opens it (in its app), V only saves
 	case "U":
 		if m.tab != tabChat {
 			m.say("U uploads into a chat space; for mail, reply and press + (or write Attach: in the editor)")
