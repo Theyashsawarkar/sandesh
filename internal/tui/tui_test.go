@@ -489,6 +489,17 @@ func TestChatExtras(t *testing.T) {
 	if !strings.Contains(m.View(), "🎉 1") {
 		t.Fatalf("reaction not shown:\n%s", m.View())
 	}
+	// e again: yours is marked, and picking it takes it away
+	nm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	m = runCmds(nm.(Model), cmd)
+	if !m.reactMine["🎉"] || !strings.Contains(m.View(), "✓") {
+		t.Fatalf("your reaction isn't marked: %v", m.reactMine)
+	}
+	nm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	m = runCmds(nm.(Model), cmd)
+	if strings.Contains(m.View(), "🎉 1") {
+		t.Fatalf("removing the reaction didn't:\n%s", m.View())
+	}
 	// edit and delete your own message
 	m = press(m, "k")
 	if !m.chatMsgs[m.chatSel].Mine {

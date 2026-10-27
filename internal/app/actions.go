@@ -272,6 +272,74 @@ func chatWrite(err error) error {
 	return err
 }
 
+// MyReactions: the emoji you've reacted with on a message.
+func (a *App) MyReactions(ctx context.Context, account, msg string) ([]string, error) {
+	acc, err := a.Store.Account(account)
+	if err != nil {
+		return nil, err
+	}
+	c, err := a.Client(account)
+	if err != nil {
+		return nil, err
+	}
+	mine, err := c.MyReactions(ctx, msg, acc.ChatUser)
+	if err != nil {
+		return nil, chatWrite(err)
+	}
+	var out []string
+	for e := range mine {
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// ToggleReaction adds the emoji to a message, or takes yours away when
+// you had already reacted with it. Reports whether it was added.
+func (a *App) ToggleReaction(ctx context.Context, account, msg, emoji string) (bool, error) {
+	acc, err := a.Store.Account(account)
+	if err != nil {
+		return false, err
+	}
+	c, err := a.Client(account)
+	if err != nil {
+		return false, err
+	}
+	mine, err := c.MyReactions(ctx, msg, acc.ChatUser)
+	if err != nil {
+		return false, chatWrite(err)
+	}
+	name, had := mine[emoji]
+	if !had {
+		return true, a.React(ctx, account, msg, emoji)
+	}
+	if err := c.DeleteReaction(ctx, name); err != nil {
+		return false, chatWrite(err)
+	}
+	if m, err := a.Store.ChatMessage(account, msg); err == nil {
+		_ = a.Store.SetReactions(account, msg, removeReaction(m.Reactions, emoji))
+	}
+	return false, nil
+}
+
+func removeReaction(summary, emoji string) string {
+	var parts []string
+	for _, p := range strings.Split(summary, " · ") {
+		e, n, ok := strings.Cut(p, " ")
+		if !ok {
+			continue
+		}
+		if e == emoji {
+			k, _ := strconv.Atoi(n)
+			if k <= 1 {
+				continue
+			}
+			p = fmt.Sprintf("%s %d", e, k-1)
+		}
+		parts = append(parts, p)
+	}
+	return strings.Join(parts, " · ")
+}
+
 // React adds an emoji reaction to a chat message.
 func (a *App) React(ctx context.Context, account, msg, emoji string) error {
 	c, err := a.Client(account)

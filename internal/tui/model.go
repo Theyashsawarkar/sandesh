@@ -131,6 +131,7 @@ type Model struct {
 	editingMsg    string           // the message of yours being edited in the box
 	armDelete     string           // d pressed once on this message
 	reactSel      int              // the emoji picked in the reaction window
+	reactMine     map[string]bool  // the reactions on the picked message that are yours
 	chatLimit     int              // how many messages of this chat to show (grows as older ones load)
 	jumpBack      []string         // replies you jumped from to their originals (Backspace goes back)
 	newLine       int              // where the "new" line is in the preview (0: none)
@@ -940,6 +941,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.gotJump(msg)
 	case olderChatMsg:
 		return m.gotOlderChat(msg)
+	case myReactionsMsg:
+		if m.mode == modeReact && m.pickingMsg() && m.chatMsgs[m.chatSel].Name == msg.msg {
+			m.reactMine = map[string]bool{}
+			for _, e := range msg.emoji {
+				m.reactMine[e] = true
+			}
+		}
+		return m, nil
 	case signedInMsg:
 		return m.gotSignedIn(msg)
 	case convoURLMsg:
@@ -1381,8 +1390,8 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		if m.pickingMsg() {
 			c := m.chatMsgs[m.chatSel]
 			switch s {
-			case "e": // react to it
-				m.mode, m.reactSel = modeReact, 0
+			case "e": // react to it (or take a reaction back)
+				return m, m.openReact()
 			case "d": // delete it (yours), d twice
 				if !c.Mine {
 					m.say("only your own messages can be deleted")

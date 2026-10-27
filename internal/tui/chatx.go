@@ -35,26 +35,64 @@ func (m Model) reactKey(s string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// sendReaction adds the emoji, or takes yours away if you'd used it.
 func (m Model) sendReaction() (tea.Model, tea.Cmd) {
 	m.mode = modeNormal
 	if !m.pickingMsg() {
 		return m, nil
 	}
 	c, emoji, a := m.chatMsgs[m.chatSel], reactions[m.reactSel], m.a
-	return m, m.act("reacted "+emoji, func(ctx context.Context) error { return a.React(ctx, c.Account, c.Name, emoji) })
+	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		added, err := a.ToggleReaction(ctx, c.Account, c.Name, emoji)
+		if err != nil {
+			return doneMsg{err: err}
+		}
+		if added {
+			return doneMsg{msg: "reacted " + emoji}
+		}
+		return doneMsg{msg: "removed your " + emoji}
+	}
+}
+
+type myReactionsMsg struct {
+	msg   string
+	emoji []string
+}
+
+// openReact opens the reaction window and asks which ones are yours.
+func (m *Model) openReact() tea.Cmd {
+	m.mode, m.reactSel, m.reactMine = modeReact, 0, nil
+	c, a := m.chatMsgs[m.chatSel], m.a
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		mine, _ := a.MyReactions(ctx, c.Account, c.Name)
+		return myReactionsMsg{c.Name, mine}
+	}
 }
 
 func (m Model) reactPopup() []string {
 	s := m.styles
-	var cells []string
+	var cells, marks []string
 	for i, e := range reactions {
 		cell := fmt.Sprintf(" %s ", e)
 		if i == m.reactSel {
 			cell = s.accent.Bold(true).Render("[") + e + s.accent.Bold(true).Render("]")
 		}
 		cells = append(cells, cell)
+		mark := "    "
+		if m.reactMine[e] {
+			mark = s.green.Render(" ✓  ")
+		}
+		marks = append(marks, mark)
 	}
-	lines := []string{strings.Join(cells, " "), s.muted.Render(" ←→ or 1-0 picks · enter reacts · esc")}
+	hint := " ←→ or 1-0 picks · enter adds it"
+	if m.reactMine[reactions[m.reactSel]] {
+		hint = " enter removes your " + reactions[m.reactSel]
+	}
+	lines := []string{strings.Join(cells, " "), strings.Join(marks, " "), s.muted.Render(hint + " · ✓ yours · esc")}
 	return m.popupFrame("react", lines, 62)
 }
 

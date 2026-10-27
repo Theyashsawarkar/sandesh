@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	stdmail "net/mail"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,6 +46,7 @@ type ChatMessage struct {
 	Created                           time.Time
 	Quoted                            string // a reply's quoted message
 	Reactions                         map[string]int
+	Mine                              map[string]bool // emoji the signed-in user reacted with
 	Edited                            bool
 }
 
@@ -445,15 +447,42 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			sp.LastRead, _ = time.Parse(time.RFC3339Nano, fmt.Sprint(body["lastReadTime"]))
 		}
 		write(w, map[string]string{"lastReadTime": sp.LastRead.UTC().Format(time.RFC3339Nano)})
+	case strings.HasPrefix(p, "/chat/v1/spaces/") && strings.HasSuffix(p, "/reactions") && r.Method == "GET":
+		name := strings.TrimSuffix(strings.TrimPrefix(p, "/chat/v1/"), "/reactions")
+		var out []any
+		for _, m := range s.Chat {
+			if m.Name == name {
+				for e := range m.Mine {
+					out = append(out, map[string]any{"name": name + "/reactions/" + url.PathEscape(e), "emoji": map[string]string{"unicode": e}})
+				}
+			}
+		}
+		write(w, map[string]any{"reactions": out})
+	case strings.HasPrefix(p, "/chat/v1/spaces/") && strings.Contains(p, "/reactions/") && r.Method == "DELETE":
+		msgName, e, _ := strings.Cut(strings.TrimPrefix(p, "/chat/v1/"), "/reactions/")
+		e, _ = url.PathUnescape(e)
+		for _, m := range s.Chat {
+			if m.Name == msgName && m.Mine[e] {
+				delete(m.Mine, e)
+				if m.Reactions[e]--; m.Reactions[e] <= 0 {
+					delete(m.Reactions, e)
+				}
+			}
+		}
+		write(w, map[string]any{})
 	case strings.HasPrefix(p, "/chat/v1/spaces/") && strings.HasSuffix(p, "/reactions") && r.Method == "POST":
 		name := strings.TrimSuffix(strings.TrimPrefix(p, "/chat/v1/"), "/reactions")
 		e, _ := body["emoji"].(map[string]any)
 		for _, m := range s.Chat {
 			if m.Name == name {
 				if m.Reactions == nil {
-					m.Reactions = map[string]int{}
+					m.Reactions, m.Mine = map[string]int{}, map[string]bool{}
+				}
+				if m.Mine == nil {
+					m.Mine = map[string]bool{}
 				}
 				m.Reactions[fmt.Sprint(e["unicode"])]++
+				m.Mine[fmt.Sprint(e["unicode"])] = true
 				write(w, map[string]any{"name": name + "/reactions/" + s.id()})
 				return
 			}

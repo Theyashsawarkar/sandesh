@@ -4,6 +4,9 @@ Newest first.
 
 ## Unreleased
 
+- **Take a reaction back**: in the reaction window (`e`), the ones you
+  added are marked ✓, and picking one removes it.
+
 - **Jump to the original**: Enter on a picked reply jumps to the message it
   quotes, loading earlier messages until it's there; Enter again follows the
   chain further back, Backspace retraces it.

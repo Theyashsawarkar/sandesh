@@ -600,6 +600,32 @@ func (c *Client) React(ctx context.Context, msg, emoji string) error {
 	return c.do(ctx, "POST", c.chat+"/"+escapePath(msg)+"/reactions", map[string]any{"emoji": map[string]string{"unicode": emoji}}, nil)
 }
 
+// MyReactions lists your reactions on a message: emoji → reaction name.
+func (c *Client) MyReactions(ctx context.Context, msg, me string) (map[string]string, error) {
+	v := url.Values{"filter": {fmt.Sprintf(`user.name = "%s"`, me)}, "pageSize": {"100"}}
+	var r struct {
+		Reactions []struct {
+			Name  string `json:"name"`
+			Emoji struct {
+				Unicode string `json:"unicode"`
+			} `json:"emoji"`
+		} `json:"reactions"`
+	}
+	if err := c.do(ctx, "GET", c.chat+"/"+escapePath(msg)+"/reactions?"+v.Encode(), nil, &r); err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, x := range r.Reactions {
+		out[x.Emoji.Unicode] = x.Name
+	}
+	return out, nil
+}
+
+// DeleteReaction removes one of your reactions.
+func (c *Client) DeleteReaction(ctx context.Context, name string) error {
+	return c.do(ctx, "DELETE", c.chat+"/"+escapePath(name), nil, nil)
+}
+
 // EditMessage changes the text of a message you sent.
 func (c *Client) EditMessage(ctx context.Context, msg, text string) error {
 	return c.do(ctx, "PATCH", c.chat+"/"+escapePath(msg)+"?updateMask=text", map[string]string{"text": text}, nil)

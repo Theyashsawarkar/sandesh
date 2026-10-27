@@ -46,7 +46,7 @@ var Keys = []Key{
 	{"Act", "Enter / 2 (chat)", "Pick messages in the chat with j/k (k past the first loads earlier ones)"},
 	{"Act", "Enter (picking)", "Jump to the message a reply quotes (again goes further back)"},
 	{"Act", "Backspace (picking)", "Jump back to the reply you came from"},
-	{"Act", "e (picking)", "Add a reaction to the picked message (👍 ❤️ 😂 🎉 …; 1-0 picks)"},
+	{"Act", "e (picking)", "Toggle a reaction on the picked message (yours are marked ✓; picking one removes it)"},
 	{"Act", "E (picking)", "Edit your picked message in the message box"},
 	{"Act", "d d (picking)", "Delete your picked message, for everyone"},
 	{"Act", "p", "Toggle the chat pinned on top of the list"},
