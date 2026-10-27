@@ -470,3 +470,47 @@ func TestRenameSpace(t *testing.T) {
 		t.Fatal("an empty name should drop the alias")
 	}
 }
+
+func TestScheduledSend(t *testing.T) {
+	a, g := setup(t)
+	ctx := context.Background()
+	if _, errs := a.SyncAll(ctx); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	later := time.Now().Add(2 * time.Hour)
+	it, err := a.Queue("work", "mail", store.Outgoing{To: []string{"rohan.d@example.com"}, Subject: "later", Body: "b",
+		ScheduledFor: later.UnixMilli()}, OriginYou)
+	if err != nil || it.SendAt != later.UnixMilli() {
+		t.Fatalf("queued: %+v %v", it, err)
+	}
+	if len(a.DeliverDue(ctx)) != 0 || len(g.Sent) != 0 {
+		t.Fatal("sent before its time")
+	}
+	// moved to the past is refused; moved to "now" goes out
+	if err := a.Reschedule(it.ID, time.Now().Add(-time.Minute)); err == nil {
+		t.Fatal("rescheduled into the past")
+	}
+	if err := a.Reschedule(it.ID, time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if done := a.DeliverDue(ctx); len(done) != 1 || done[0].Status != store.StatusSent {
+		t.Fatalf("not delivered when due: %+v", done)
+	}
+	// an agent's scheduled send: approval first, then it waits for its time
+	a.Config.SendPolicy = config.PolicyConfirm
+	it, _ = a.Queue("work", "chat", store.Outgoing{Space: "spaces/portal-dev", Body: "later", ScheduledFor: later.UnixMilli()}, OriginAgent)
+	if it.Status != store.StatusApproval {
+		t.Fatalf("agent's schedule skipped approval: %+v", it)
+	}
+	if err := a.Approve(it.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	it, _ = a.Store.OutboxItem(it.ID)
+	if it.Status != store.StatusQueued || it.SendAt != later.UnixMilli() {
+		t.Fatalf("approved schedule: %+v", it)
+	}
+	if err := a.Cancel(it.ID); err != nil {
+		t.Fatal(err)
+	}
+}

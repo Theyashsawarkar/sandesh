@@ -506,7 +506,7 @@ func splitAddrs(s string) []string {
 }
 
 func mailSend(a *app.App, args []string) error {
-	fs := flags("sandesh mail send", `sandesh mail send --to A[,B] [--cc C] [--subject S] [--attach FILE]... [--reply THREAD] [--all] [--account A] [--now]
+	fs := flags("sandesh mail send", `sandesh mail send --to A[,B] [--cc C] [--subject S] [--attach FILE]... [--at WHEN] [--reply THREAD] [--all] [--account A] [--now]
 
 The body comes from stdin, or $EDITOR when stdin is a terminal. --reply
 answers a thread (subject, recipients and quoting filled in; --all is reply
@@ -521,6 +521,7 @@ all). The send waits undo_seconds (default 10) first: Ctrl+c cancels.`)
 	nowFlag := fs.Bool("now", false, "skip the undo window")
 	var attach listFlag
 	fs.Var(&attach, "attach", "a file to attach (repeat for more)")
+	at := fs.String("at", "", "send later: \"tomorrow 9am\", \"fri 6pm\", \"in 2h\", \"3 nov 10:30\"")
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
@@ -578,6 +579,9 @@ all). The send waits undo_seconds (default 10) first: Ctrl+c cancels.`)
 	if *nowFlag {
 		a.Config.UndoSeconds = 0
 	}
+	if err := scheduleFlag(&out, *at); err != nil {
+		return err
+	}
 	it, err := a.Queue(acc.Name, "mail", out, app.OriginYou)
 	if err != nil {
 		return err
@@ -585,8 +589,17 @@ all). The send waits undo_seconds (default 10) first: Ctrl+c cancels.`)
 	return waitSend(a, it)
 }
 
-// waitSend waits out the undo window (Ctrl+c cancels), then delivers.
+// waitSend waits out the undo window (Ctrl+c cancels), then delivers. A
+// scheduled send is left to the background service.
 func waitSend(a *app.App, it store.OutboxItem) error {
+	if it.Out.ScheduledFor > 0 && it.Status == store.StatusQueued {
+		t := time.UnixMilli(it.Out.ScheduledFor)
+		fmt.Printf("sandesh: scheduled for %s (#%d) · sandesh outbox cancel %d stops it\n", t.Format("Mon 02 Jan 15:04"), it.ID, it.ID)
+		if !a.DaemonRunning() {
+			fmt.Fprintln(os.Stderr, "sandesh: the background service isn't running: it sends scheduled mail. Start it with `sandesh service install`.")
+		}
+		return nil
+	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sig)
@@ -776,11 +789,12 @@ func chat(a *app.App, args []string) error {
 	case "save", "download":
 		return chatSave(a, rest)
 	case "send", "post":
-		fs := flags("sandesh chat send", "sandesh chat send <space> <text...> [--attach FILE]... [--thread T] [--now]\n\nPost in a space or DM (text from stdin when not given). Waits undo_seconds first.")
+		fs := flags("sandesh chat send", "sandesh chat send <space> <text...> [--attach FILE]... [--at WHEN] [--thread T] [--now]\n\nPost in a space or DM (text from stdin when not given). Waits undo_seconds first.")
 		thread := fs.String("thread", "", "reply in this thread (spaces/x/threads/y)")
 		nowFlag := fs.Bool("now", false, "skip the undo window")
 		var attach listFlag
 		fs.Var(&attach, "attach", "a file to upload with it (repeat for more)")
+		at := fs.String("at", "", "send later: \"tomorrow 9am\", \"in 2h\"...")
 		pos, err := parse(fs, rest)
 		if err != nil {
 			return err
@@ -800,7 +814,11 @@ func chat(a *app.App, args []string) error {
 		if *nowFlag {
 			a.Config.ChatUndoSeconds = 0
 		}
-		it, err := a.Queue(sp.Account, "chat", store.Outgoing{Space: sp.Name, SpaceName: SpaceTitle(sp), Thread: *thread, Body: text, Files: attach.files()}, app.OriginYou)
+		out := store.Outgoing{Space: sp.Name, SpaceName: SpaceTitle(sp), Thread: *thread, Body: text, Files: attach.files()}
+		if err := scheduleFlag(&out, *at); err != nil {
+			return err
+		}
+		it, err := a.Queue(sp.Account, "chat", out, app.OriginYou)
 		if err != nil {
 			return err
 		}
@@ -1042,7 +1060,38 @@ func syncCmd(a *app.App, args []string) error {
 
 // ----------------------------------------------------------------- outbox
 
+// scheduleFlag reads --at into the message.
+func scheduleFlag(out *store.Outgoing, at string) error {
+	if strings.TrimSpace(at) == "" {
+		return nil
+	}
+	t, err := app.ParseWhen(at, time.Now())
+	if err != nil {
+		return usageError("--at: %v", err)
+	}
+	out.ScheduledFor = t.UnixMilli()
+	return nil
+}
+
 func outbox(a *app.App, args []string) error {
+	if len(args) > 0 && args[0] == "reschedule" {
+		if len(args) < 3 {
+			return usageError("outbox reschedule <id> <when>")
+		}
+		id, err := strconv.ParseInt(strings.TrimPrefix(args[1], "#"), 10, 64)
+		if err != nil {
+			return usageError("bad id %q", args[1])
+		}
+		t, err := app.ParseWhen(strings.Join(args[2:], " "), time.Now())
+		if err != nil {
+			return err
+		}
+		if err := a.Reschedule(id, t); err != nil {
+			return err
+		}
+		fmt.Printf("#%d goes out %s\n", id, t.Format("Mon 02 Jan 15:04"))
+		return nil
+	}
 	if len(args) > 0 && args[0] == "cancel" {
 		if len(args) != 2 {
 			return usageError("outbox cancel <id>")
@@ -1057,7 +1106,7 @@ func outbox(a *app.App, args []string) error {
 		fmt.Println("cancelled")
 		return nil
 	}
-	fs := flags("sandesh outbox", "sandesh outbox [--json]\nsandesh outbox cancel <id>\n\nSends of the last week: waiting for approval, in the undo window, sent, failed.")
+	fs := flags("sandesh outbox", "sandesh outbox [--json]\nsandesh outbox cancel <id>\nsandesh outbox reschedule <id> <when>\n\nSends of the last week and scheduled ones: waiting for approval, scheduled, in the undo window, sent, failed.")
 	asJSON := fs.Bool("json", false, "JSON output")
 	if _, err := parse(fs, args); err != nil {
 		return err
@@ -1084,7 +1133,12 @@ func outbox(a *app.App, args []string) error {
 		for _, f := range it.Out.Files {
 			what = strings.TrimSpace(what + " 📎 " + f.Name)
 		}
-		fmt.Printf("#%-4d %-9s %-5s %-6s %-28.28s %s\n", it.ID, it.Status, it.Kind, it.Origin, to, what)
+		status := it.Status
+		if it.Status == store.StatusQueued && it.Out.ScheduledFor > 0 {
+			status = "scheduled"
+			what += "  ⏰ " + app.SendTime(time.UnixMilli(it.Out.ScheduledFor), time.Now())
+		}
+		fmt.Printf("#%-4d %-9s %-5s %-6s %-28.28s %s\n", it.ID, status, it.Kind, it.Origin, to, what)
 		if it.Error != "" {
 			fmt.Printf("      %s\n", it.Error)
 		}

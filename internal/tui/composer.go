@@ -84,6 +84,7 @@ type composer struct {
 	orig          []string // ...rendered for it
 	origScroll    int
 	draftKey      string
+	replaceID     int64 // editing a waiting send: it's replaced on send
 	dirty         bool
 	savedAt       time.Time
 }
@@ -523,6 +524,12 @@ func (m Model) composerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+s":
 		return m.composerSend()
+	case "ctrl+t":
+		if c.approveID > 0 {
+			return m, nil
+		}
+		m.openWhen("compose")
+		return m, nil
 	case "ctrl+d":
 		if c.approveID > 0 {
 			return m, nil
@@ -753,6 +760,13 @@ func (m Model) composerSend() (tea.Model, tea.Cmd) {
 		m.say("no subject · ctrl+s again sends anyway")
 		return m, nil
 	}
+	if c.replaceID > 0 {
+		// the waiting one makes way for this one
+		if err := m.a.Cancel(c.replaceID); err != nil {
+			m.setErr("couldn't replace it: " + err.Error())
+			return m, nil
+		}
+	}
 	it, err := m.a.Queue(c.account, "mail", out, app.OriginYou)
 	if err != nil {
 		m.setErr(err.Error())
@@ -945,13 +959,16 @@ func (m Model) composerView(w, h int) string {
 	if len(firstTime) > 0 {
 		left += s.peach.Render("  ● first time writing to " + strings.Join(firstTime, ", "))
 	}
+	if c.base.ScheduledFor > 0 {
+		left += s.blue.Render("  ⏰ goes out " + app.SendTime(time.UnixMilli(c.base.ScheduledFor), time.Now()) + " (ctrl+t changes)")
+	}
 	btn := func(k, label string, primary bool) string {
 		if primary {
 			return s.round(s.pill, k+" "+label)
 		}
 		return s.round(s.keycap, k) + s.muted.Render(" "+label)
 	}
-	buttons := []string{btn("ctrl+s", "send", true), btn("ctrl+d", "draft", false), btn("ctrl+e", "nvim", false), btn("esc", "discard", false)}
+	buttons := []string{btn("ctrl+s", "send", true), btn("ctrl+t", "later", false), btn("ctrl+d", "draft", false), btn("ctrl+e", "nvim", false), btn("esc", "discard", false)}
 	if c.approveID > 0 {
 		buttons = []string{btn("ctrl+s", "keep changes", true), btn("ctrl+e", "nvim", false), btn("esc", "back", false)}
 	}

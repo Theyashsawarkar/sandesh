@@ -14,6 +14,31 @@ import (
 	"github.com/Theyashsawarkar/sandesh/internal/store"
 )
 
+// sendAt is when a queued message goes: its scheduled time, else after the
+// undo window.
+func (a *App) sendAt(kind string, out store.Outgoing) int64 {
+	undo := time.Now().Add(a.UndoWindow(kind)).UnixMilli()
+	return max(undo, out.ScheduledFor)
+}
+
+// Reschedule moves a scheduled (or waiting) send to another time.
+func (a *App) Reschedule(id int64, at time.Time) error {
+	it, err := a.Store.OutboxItem(id)
+	if err != nil {
+		return err
+	}
+	if !at.After(time.Now()) {
+		return errors.New("that time has passed")
+	}
+	out := it.Out
+	out.ScheduledFor = at.UnixMilli()
+	ok, err := a.Store.Reschedule(id, out, at.UnixMilli())
+	if err == nil && !ok {
+		err = fmt.Errorf("#%d is %s: too late to move", id, it.Status)
+	}
+	return err
+}
+
 // UndoWindow is how long a send of this kind waits before going out.
 func (a *App) UndoWindow(kind string) time.Duration {
 	if kind == "chat" {
@@ -49,7 +74,7 @@ func (a *App) Queue(account, kind string, out store.Outgoing, origin string) (st
 	}
 	if it.Status == "" {
 		it.Status = store.StatusQueued
-		it.SendAt = time.Now().Add(a.UndoWindow(kind)).UnixMilli()
+		it.SendAt = a.sendAt(kind, out)
 	}
 	id, err := a.Store.AddOutbox(it)
 	if err != nil {
@@ -160,7 +185,11 @@ func (a *App) Approve(id int64, edited *store.Outgoing) error {
 			return err
 		}
 	}
-	ok, err := a.Store.Transition(id, store.StatusApproval, store.StatusQueued, time.Now().Add(a.UndoWindow(it.Kind)).UnixMilli())
+	out := it.Out
+	if edited != nil {
+		out = *edited
+	}
+	ok, err := a.Store.Transition(id, store.StatusApproval, store.StatusQueued, a.sendAt(it.Kind, out))
 	if err == nil && !ok {
 		err = fmt.Errorf("#%d changed meanwhile", id)
 	}
@@ -229,6 +258,11 @@ func (a *App) DeliverDue(ctx context.Context) []store.OutboxItem {
 			_ = a.Store.FinishOutbox(it.ID, store.StatusSent, "", result)
 			it.Status, it.Result = store.StatusSent, result
 			a.dropFiles(it.Out.Files)
+			if s := it.Out.ScheduledFor; s > 0 && time.Since(time.UnixMilli(s)) > 5*time.Minute {
+				// the computer was off (or asleep) at the time
+				Notify("sandesh: a scheduled message went out late",
+					fmt.Sprintf("%s was due %s; sent now.", describe(it.Kind, it.Out), time.UnixMilli(s).Format("Mon 02 Jan 15:04")))
+			}
 		}
 		if it.Origin == OriginAgent {
 			a.LogAgent("deliver #%d %s %s", it.ID, it.Status, it.Error)

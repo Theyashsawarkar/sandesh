@@ -103,8 +103,16 @@ func (m Model) View() string {
 	pw := m.w - lw
 	bh := m.bodyHeight()
 	left := m.box(lw, bh, m.listTitle(), m.listView(lw-2, bh-2), m.focus == 0 && m.mode == modeNormal, m.styles.c.Accent)
+	// under a popup, draw what it was opened over
+	under := m.mode
+	switch {
+	case m.mode == modeWhen && m.when != nil:
+		under = m.when.back
+	case m.mode == modePick && m.pick != nil:
+		under = m.pickMode
+	}
 	var right string
-	switch m.mode {
+	switch under {
 	case modeReview:
 		right = m.box(pw, bh, "review: y send · e edit · + file · d draft · n discard", m.reviewView(pw-4, bh-2), true, m.styles.c.Accent2)
 	case modeApprove:
@@ -112,7 +120,7 @@ func (m Model) View() string {
 	default:
 		right = m.previewBox(pw, bh)
 	}
-	if m.mode == modeCompose && m.comp != nil {
+	if under == modeCompose && m.comp != nil {
 		rows = append(rows, m.composerPanes(bh))
 	} else {
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, left, right))
@@ -122,6 +130,9 @@ func (m Model) View() string {
 		rows[len(rows)-1] = overlay(rows[len(rows)-1], m.finderView(), m.w)
 	case m.mode == modeHelp:
 		box := m.helpPopup()
+		rows[len(rows)-1] = overlayAt(rows[len(rows)-1], box, m.w, max(0, (bh-len(box))/2))
+	case m.mode == modeWhen && m.when != nil:
+		box := m.whenPopup()
 		rows[len(rows)-1] = overlayAt(rows[len(rows)-1], box, m.w, max(0, (bh-len(box))/2))
 	case m.mode == modePick && m.pick != nil:
 		box := m.pickerPopup()
@@ -379,16 +390,18 @@ func (m Model) inputView() string {
 func (m Model) footerView() string {
 	s := m.styles
 	modeName := map[mode]string{modeNormal: "normal", modeFilter: "filter", modeAsk: "ask", modeSearch: "search", modeSaveName: "save",
-		modeDraftHint: "draft", modeReview: "review", modeApprove: "approve", modeHelp: "keys", modeChatMsg: "message", modeLink: "link", modeCompose: "compose", modeFind: "search", modeRename: "rename", modePick: "files"}[m.mode]
+		modeDraftHint: "draft", modeReview: "review", modeApprove: "approve", modeHelp: "keys", modeChatMsg: "message", modeLink: "link", modeCompose: "compose", modeFind: "search", modeRename: "rename", modePick: "files", modeWhen: "later"}[m.mode]
 	var keys [][2]string
 	switch m.mode {
 	case modeReview:
-		keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"+", "file"}, {"-", "drop file"}, {"d", "save draft"}, {"n", "discard"}}
+		keys = [][2]string{{"y", "send"}, {"t", "later"}, {"e", "edit"}, {"+", "file"}, {"-", "drop file"}, {"d", "save draft"}, {"n", "discard"}}
 		if m.review != nil && m.review.kind == "chat" {
-			keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"+", "file"}, {"-", "drop file"}, {"n", "discard"}}
+			keys = [][2]string{{"y", "send"}, {"t", "later"}, {"e", "edit"}, {"+", "file"}, {"-", "drop file"}, {"n", "discard"}}
 		}
 	case modeApprove:
 		keys = [][2]string{{"y", "send"}, {"e", "edit"}, {"n", "decline"}, {"q", "later"}}
+	case modeWhen:
+		keys = [][2]string{{"↑↓", "pick"}, {"enter", "schedule"}, {"esc", "cancel"}}
 	case modePick:
 		keys = [][2]string{{"↑↓", "move"}, {"tab", "pick several"}, {"enter", "add"}, {"esc", "close"}}
 	case modeFind:
@@ -404,7 +417,7 @@ func (m Model) footerView() string {
 	case modeFilter, modeAsk, modeSearch, modeSaveName, modeDraftHint, modeLink, modeRename:
 		keys = [][2]string{{"enter", "done"}, {"esc", "cancel"}, {"ctrl+u", "clear"}}
 	case modeChatMsg:
-		keys = [][2]string{{"enter", "send"}, {"esc", "cancel"}, {"ctrl+u", "clear"}}
+		keys = [][2]string{{"enter", "send"}, {"ctrl+t", "send later"}, {"esc", "cancel"}, {"ctrl+u", "clear"}}
 	case modeHelp:
 		keys = [][2]string{{"?", "close"}}
 	default:

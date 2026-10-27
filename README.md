@@ -234,7 +234,8 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `*` | Toggle the star on the thread |
 | `L` | Add or remove a label (fzf picker) |
 | `x` | Select the thread for e / d / m / M |
-| `i` | Start typing a chat message right in the preview |
+| `i` | Start typing a chat message right in the preview (Ctrl+t sends it later) |
+| `t` | Move a scheduled send to another time (in Sent; Enter edits it) |
 | `n` | Rename the chat (a space on Google Chat; a DM or group only here) |
 | `v` | Save the attachments to ~/Downloads/sandesh (picker when several) |
 | `V` | Open the attachments (saved to ~/Downloads/sandesh first) |
@@ -316,6 +317,7 @@ whole mail there and back, or set `compose = "editor"`.
 | `Enter` / `,` | Add the picked contact or typed address, and stay for more |
 | `Backspace` | Remove the last recipient (in an empty To, Cc or Bcc) |
 | `Ctrl+s` | Send the mail (after the undo window) |
+| `Ctrl+t` | Send the mail later (pick or type when: tomorrow 9am, fri 6pm, in 2h) |
 | `Ctrl+d` | Save the mail as a Gmail draft and close it |
 | `Ctrl+o` | Add files to the mail (file picker with preview; x removes one in Files) |
 | `Ctrl+e` | Edit the whole mail in your editor, then come back |
@@ -334,12 +336,29 @@ whole mail there and back, or set `compose = "editor"`.
 | Key | Review | Approve |
 |---|---|---|
 | `y` | Send the message you wrote (after the undo window) | Send the message an agent wrote (after the undo window) |
+| `t` | Send the message later (pick or type when) | |
 | `e` | Edit the message again in your editor | Edit the agent's message in your editor first |
 | `+` | Add a file to the message (attach; file picker with preview) | |
 | `-` | Remove the last file added to the message | |
 | `d` | Save the message as a Gmail draft instead of sending | |
 | `n` | Delete the message you wrote (discard) | Cancel the agent's message (decline; nothing is sent) |
 | `q` | | Leave the agent's message waiting and go back |
+
+## Sending later
+
+`Ctrl+t` in a mail, `t` on the review screen, or `Ctrl+t` while typing a
+chat message (`i`) asks *when*: pick one (in an hour, this evening,
+tomorrow morning or afternoon, Monday morning) or type it the way you'd say
+it: `tomorrow 9am`, `fri 6pm`, `in 2h`, `3 nov 10:30`, `03/11 9am`,
+`2026-12-01 18:00`. It shows what it understood before you confirm. The
+message waits in sandesh's outbox and the background service sends it then
+(Gmail's API has no scheduled send of its own), so this computer must be on
+at that time: if it wasn't, the message goes out as soon as it is, and a
+notification says it went out late. Scheduled mail and messages sit at the
+top of **Sent** with their time: `t` moves one, Enter edits it, `z` cancels
+it. From the shell: `--at "tomorrow 9am"` on `mail send` and `chat send`;
+`sandesh outbox reschedule <id> <when>`. Agents can schedule too
+(`send_at`), still after your approval.
 
 ## Sent mail
 

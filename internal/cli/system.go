@@ -167,15 +167,28 @@ func daemon(a *app.App, args []string) error {
 			}
 		}
 	}
+	// sends go out on their own clock: a slow sync never delays a
+	// scheduled message or the end of an undo window
+	go func() {
+		t := time.NewTicker(time.Second)
+		defer t.Stop()
+		for {
+			for _, sent := range a.DeliverDue(ctx) {
+				if sent.Status == store.StatusFailed {
+					log.Printf("send #%d failed: %s", sent.ID, sent.Error)
+					app.Notify("sandesh: send failed", sent.Error)
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+		}
+	}()
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	for {
-		for _, sent := range a.DeliverDue(ctx) {
-			if sent.Status == store.StatusFailed {
-				log.Printf("send #%d failed: %s", sent.ID, sent.Error)
-				app.Notify("sandesh: send failed", sent.Error)
-			}
-		}
 		for _, acc := range a.AccountNames() {
 			step(mailNext, acc, a.Config.MailInterval.Duration, a.SyncMail)
 			step(chatNext, acc, a.Config.ChatInterval.Duration, a.SyncChat)

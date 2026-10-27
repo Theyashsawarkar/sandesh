@@ -205,6 +205,9 @@ func (m Model) reviewKey(s string) (tea.Model, tea.Cmd) {
 		})
 	case "+":
 		return m, m.pickFiles("review")
+	case "t":
+		m.openWhen("review")
+		return m, nil
 	case "-":
 		if n := len(r.out.Files); n > 0 {
 			r.out.Files = r.out.Files[:n-1]

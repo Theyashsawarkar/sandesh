@@ -4,6 +4,14 @@ Newest first.
 
 ## Unreleased
 
+- **Send later**: `Ctrl+t` in a mail, `t` on review, `Ctrl+t` while typing a
+  chat message: pick a time or type it ("tomorrow 9am", "fri 6pm", "in 2h",
+  "3 nov 10:30"). Scheduled sends wait in the outbox and the background
+  service sends them on time (on its own loop now, so a slow sync never
+  delays one); a send that goes out late because the computer was off says
+  so. They're listed on top of Sent (`t` moves, Enter edits, `z` cancels).
+  CLI `--at` and `outbox reschedule`; MCP `send_at`.
+
 - **Search no longer freezes the screen**: a one-letter search took ~5 s on a
   real mailbox (the full-text index was queried once per thread); it is now
   one lookup (~20-50 ms), and it runs in the background after a short pause

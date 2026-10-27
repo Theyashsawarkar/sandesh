@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/Theyashsawarkar/sandesh/internal/app"
 	"regexp"
 	"strings"
 	"time"
@@ -102,6 +103,9 @@ func (m Model) outboxStatus(it store.OutboxItem) (string, string) {
 	s := m.styles
 	switch it.Status {
 	case store.StatusQueued:
+		if it.Out.ScheduledFor > 0 {
+			return "⏰ " + app.SendTime(time.UnixMilli(it.Out.ScheduledFor), time.Now()), s.c.Blue
+		}
 		return fmt.Sprintf("sending in %ds", max(0, int(time.Until(time.UnixMilli(it.SendAt)).Seconds()+0.5))), s.c.Yellow
 	case store.StatusSending:
 		return "sending…", s.c.Yellow
@@ -215,9 +219,17 @@ func (m *Model) listView(w, h int) string {
 				if !sel {
 					border = col
 				}
-				lines = []string{row(s.text.Render("→ "+m.toNames(it.Account, strings.Join(it.Out.To, ", "))), fg(col).Render(status), cw), s.text.Render(t.Subject),
-					ansi.Truncate(fg(col).Render(map[string]string{store.StatusQueued: "z cancels", store.StatusFailed: "R sends it again",
-						store.StatusApproval: "A answers it", store.StatusSending: "…"}[it.Status])+s.muted.Render("  "+oneLine(it.Out.Body)), cw, "…")}
+				to := "→ " + m.toNames(it.Account, strings.Join(it.Out.To, ", "))
+				if it.Kind == "chat" {
+					to = "→ # " + it.Out.SpaceName
+				}
+				hint := map[string]string{store.StatusQueued: "z cancels", store.StatusFailed: "R sends it again · ⏎ edits",
+					store.StatusApproval: "A answers it", store.StatusSending: "…"}[it.Status]
+				if it.Status == store.StatusQueued && it.Out.ScheduledFor > 0 {
+					hint = "t moves · ⏎ edits · z cancels"
+				}
+				lines = []string{row(s.text.Render(to), fg(col).Render(status), cw), s.text.Render(t.Subject),
+					ansi.Truncate(fg(col).Render(hint)+s.muted.Render("  "+oneLine(it.Out.Body)), cw, "…")}
 				for _, l := range m.cardBox(lines, cw, border, sel, false) {
 					out = append(out, " "+l)
 				}
@@ -350,6 +362,9 @@ func (m *Model) buildPreview(w int) {
 	} else if it, ok := m.curOutbox(); ok {
 		note := map[string]string{store.StatusQueued: "in its undo window · z cancels", store.StatusSending: "sending now",
 			store.StatusApproval: "an agent's mail waiting for your approval (A)", store.StatusFailed: "failed: " + it.Error + " · R sends it again"}[it.Status]
+		if it.Status == store.StatusQueued && it.Out.ScheduledFor > 0 {
+			note = "⏰ scheduled for " + time.UnixMilli(it.Out.ScheduledFor).Format("Monday 02 January, 15:04") + " · t moves it · enter edits · z cancels"
+		}
 		m.preview = strings.Split(m.outgoingView(it.Kind, it.Out, note, w), "\n")
 	} else if _, ok := m.curSpace(); ok {
 		m.preview = m.chatLines(w)

@@ -35,6 +35,7 @@ const (
 	modeLink    // typing a link number after o
 	modeRename  // typing a chat's new name
 	modePick    // the file picker
+	modeWhen    // picking when to send
 	modeCompose // the compose screen
 	modeFind    // the search window
 )
@@ -115,6 +116,7 @@ type Model struct {
 	flashMsg     string         // a chat message opened from search: marked
 	chatMsgLine  map[string]int // where each chat message starts in the preview
 	pick         *picker
+	when         *whenPicker
 	pickMode     mode   // where the picker goes back to
 	helpQ        string // filtering the keys popup
 	helpTop      int
@@ -376,13 +378,17 @@ func (m *Model) outboxThreads(accs []string) []store.Thread {
 	m.outboxRows = map[string]store.OutboxItem{}
 	var out []store.Thread
 	for _, it := range items {
-		if it.Kind != "mail" || (len(accs) > 0 && !slices.Contains(accs, it.Account)) ||
+		if (len(accs) > 0 && !slices.Contains(accs, it.Account)) ||
 			it.Status == store.StatusFailed && time.Since(time.UnixMilli(it.Created)) > 7*24*time.Hour {
 			continue
 		}
 		id := fmt.Sprintf("%s%d", outboxPrefix, it.ID)
 		m.outboxRows[id] = it
-		out = append(out, store.Thread{Account: it.Account, ID: id, Subject: it.Out.Subject, Participants: strings.Join(it.Out.To, ", "),
+		subject := it.Out.Subject
+		if it.Kind == "chat" {
+			subject = "chat message"
+		}
+		out = append(out, store.Thread{Account: it.Account, ID: id, Subject: subject, Participants: strings.Join(it.Out.To, ", "),
 			Snippet: oneLine(it.Out.Body), LastDate: max(it.SendAt, it.Created)})
 	}
 	return out
@@ -464,6 +470,13 @@ func (m *Model) sent(it store.OutboxItem) tea.Cmd {
 	}
 	if it.Status != store.StatusQueued {
 		m.say("waiting for approval")
+		return nil
+	}
+	if it.Out.ScheduledFor > 0 {
+		m.say("scheduled for " + app.SendTime(time.UnixMilli(it.Out.ScheduledFor), time.Now()) + " · in Sent: t moves it, z cancels")
+		if !m.a.DaemonRunning() {
+			m.setErr("the background service isn't running, and it's what sends scheduled mail: sandesh service install")
+		}
 		return nil
 	}
 	if w := m.a.UndoWindow(it.Kind); w > 0 {
@@ -757,6 +770,19 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modePick && m.pick != nil {
 		return m.pickerKey(k)
 	}
+	if m.mode == modeWhen && m.when != nil {
+		return m.whenKey(k)
+	}
+	// Ctrl+t while typing a chat message: send it later
+	if m.mode == modeChatMsg && s == "ctrl+t" {
+		if strings.TrimSpace(string(m.input)) == "" {
+			return m, nil
+		}
+		text := string(m.input)
+		m.openWhen("chat")
+		m.when.text, m.when.back = text, modeNormal
+		return m, nil
+	}
 	if m.mode == modeHelp {
 		return m.helpKey(k)
 	}
@@ -969,6 +995,26 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 	case "2":
 		m.focus = 1
 	case "enter":
+		if it, ok := m.curOutbox(); ok {
+			// a mail or message still waiting: open it to change it
+			switch it.Status {
+			case store.StatusApproval:
+				m.mode = modeApprove
+				return m, nil
+			case store.StatusQueued, store.StatusFailed:
+				if it.Kind == "mail" {
+					body, quoted := splitQuoted(it.Out.Body)
+					out := it.Out
+					out.Body = body
+					cmd := m.openComposer(it.Account, "edit · "+map[bool]string{true: "scheduled", false: "failed"}[it.Status == store.StatusQueued], out, quoted, 0)
+					if m.comp != nil {
+						m.comp.replaceID = it.ID
+					}
+					return m, cmd
+				}
+			}
+			return m, nil
+		}
 		if m.focus == 1 && m.tab == tabMail {
 			m.expandAll = !m.expandAll
 			return m, nil
@@ -1089,6 +1135,11 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 			}
 			m.olderN = sizes[max(0, i)]
 			m.say(fmt.Sprintf("older mail loads %d at a time", m.olderN))
+		}
+	case "t":
+		if it, ok := m.curOutbox(); ok && it.Status == store.StatusQueued {
+			m.openWhen("outbox")
+			m.when.outboxID = it.ID
 		}
 	case "z":
 		if it, ok := m.curOutbox(); ok && (it.Status == store.StatusQueued || it.Status == store.StatusApproval) {

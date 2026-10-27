@@ -37,6 +37,8 @@ type Outgoing struct {
 	// both
 	Body  string `json:"body"`
 	Files []File `json:"files,omitempty"`
+	// ScheduledFor (ms) holds it until then instead of the undo window
+	ScheduledFor int64 `json:"scheduled_for,omitempty"`
 }
 
 // File is an attachment to send: a private copy made when it was queued
@@ -173,4 +175,15 @@ func (s *Store) RecoverSending() error {
 	_, err := s.db.Exec(`UPDATE outbox SET status=?, error='interrupted while sending; check Sent before retrying' WHERE status=? AND send_at < ?`,
 		StatusFailed, StatusSending, time.Now().Add(-time.Minute).UnixMilli())
 	return err
+}
+
+// Reschedule moves a waiting send to another time (and its payload too).
+func (s *Store) Reschedule(id int64, out Outgoing, at int64) (bool, error) {
+	payload, _ := json.Marshal(out)
+	res, err := s.db.Exec(`UPDATE outbox SET send_at=?, payload=? WHERE id=? AND status=?`, at, string(payload), id, StatusQueued)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
 }

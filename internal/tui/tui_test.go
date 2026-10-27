@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -79,6 +80,8 @@ func press(m Model, keys ...string) Model {
 			msg = tea.KeyMsg{Type: tea.KeyDown}
 		case "shift+tab":
 			msg = tea.KeyMsg{Type: tea.KeyShiftTab}
+		case "ctrl+t":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlT}
 		case "backspace":
 			msg = tea.KeyMsg{Type: tea.KeyBackspace}
 		default:
@@ -263,5 +266,42 @@ func TestSearchScopes(t *testing.T) {
 	m = press(m, "enter")
 	if sp, ok := m.curSpace(); !ok || sp.Name != "spaces/portal-dev" || m.flashMsg == "" {
 		t.Fatalf("opened %+v %q", sp, m.flashMsg)
+	}
+}
+
+func TestSchedule(t *testing.T) {
+	m := model(t)
+	m = press(m, "c")
+	m = typeText(m, "rohan.d@example.com")
+	m = press(m, "tab")
+	m = typeText(m, "later")
+	m = press(m, "tab", "tab")
+	m = typeText(m, "see you")
+	m = press(m, "ctrl+t")
+	if m.mode != modeWhen || !strings.Contains(m.View(), "Tomorrow morning") {
+		t.Fatal("ctrl+t should ask when")
+	}
+	m = typeText(m, "in 2h")
+	if !strings.Contains(m.View(), "→ ") {
+		t.Fatal("the typed time should be read back")
+	}
+	m = press(m, "enter")
+	q, _ := m.a.Store.Outbox(store.StatusQueued)
+	if len(q) != 1 || q[0].Out.ScheduledFor == 0 || time.Until(time.UnixMilli(q[0].SendAt)) < 119*time.Minute {
+		t.Fatalf("scheduled: %+v", q)
+	}
+	// it sits on top of Sent with its time; t moves it
+	for m.currentSection().Label != "SENT" {
+		m = press(m, "l")
+	}
+	if !strings.Contains(m.View(), "⏰ in 120 min") && !strings.Contains(m.View(), "⏰ today") && !strings.Contains(m.View(), "⏰ tomorrow") {
+		t.Fatalf("Sent doesn't show the scheduled mail:\n%s", m.View())
+	}
+	m = press(m, "g", "t")
+	m = typeText(m, "tomorrow 10am")
+	m = press(m, "enter")
+	it, _ := m.a.Store.OutboxItem(q[0].ID)
+	if time.UnixMilli(it.SendAt).Hour() != 10 {
+		t.Fatalf("moved: %v", time.UnixMilli(it.SendAt))
 	}
 }

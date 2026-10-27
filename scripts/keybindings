@@ -28,7 +28,8 @@
 # keybind: Tmux/sandesh | * | Toggle the star on the thread
 # keybind: Tmux/sandesh | L | Add or remove a label (fzf picker)
 # keybind: Tmux/sandesh | x | Select the thread for e / d / m / M
-# keybind: Tmux/sandesh | i | Start typing a chat message right in the preview
+# keybind: Tmux/sandesh | i | Start typing a chat message right in the preview (Ctrl+t sends it later)
+# keybind: Tmux/sandesh | t | Move a scheduled send to another time (in Sent; Enter edits it)
 # keybind: Tmux/sandesh | n | Rename the chat (a space on Google Chat; a DM or group only here)
 # keybind: Tmux/sandesh | v | Save the attachments to ~/Downloads/sandesh (picker when several)
 # keybind: Tmux/sandesh | V | Open the attachments (saved to ~/Downloads/sandesh first)
@@ -49,6 +50,7 @@
 # keybind: Tmux/sandesh compose | Enter / , | Add the picked contact or typed address, and stay for more
 # keybind: Tmux/sandesh compose | Backspace | Remove the last recipient (in an empty To, Cc or Bcc)
 # keybind: Tmux/sandesh compose | Ctrl+s | Send the mail (after the undo window)
+# keybind: Tmux/sandesh compose | Ctrl+t | Send the mail later (pick or type when: tomorrow 9am, fri 6pm, in 2h)
 # keybind: Tmux/sandesh compose | Ctrl+d | Save the mail as a Gmail draft and close it
 # keybind: Tmux/sandesh compose | Ctrl+o | Add files to the mail (file picker with preview; x removes one in Files)
 # keybind: Tmux/sandesh compose | Ctrl+e | Edit the whole mail in your editor, then come back
@@ -65,6 +67,7 @@
 # keybind: Tmux/sandesh search | Ctrl+u | Clear the search
 # keybind: Tmux/sandesh search | Esc | Close the search window
 # keybind: Tmux/sandesh review | y | Send the message you wrote (after the undo window)
+# keybind: Tmux/sandesh review | t | Send the message later (pick or type when)
 # keybind: Tmux/sandesh review | e | Edit the message again in your editor
 # keybind: Tmux/sandesh review | + | Add a file to the message (attach; file picker with preview)
 # keybind: Tmux/sandesh review | - | Remove the last file added to the message
