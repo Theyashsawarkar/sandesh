@@ -559,10 +559,6 @@ var reMention = regexp.MustCompile(`@[\p{L}\p{N}_.-]+`)
 // yours sit on the right with a green bar.
 func (m *Model) chatLines(w int) []string {
 	m.chatMsgLine = map[string]int{}
-	threaded := false
-	if sp, ok := m.curSpace(); ok {
-		threaded = sp.Threaded
-	}
 	byName := map[string]store.ChatMessage{}
 	for _, c := range m.chatMsgs {
 		byName[c.Name] = c
@@ -624,9 +620,6 @@ func (m *Model) chatLines(w int) []string {
 		for k, g := range m.chatMsgs[i:j] {
 			m.chatMsgLine[g.Name] = len(out)
 			var lines []string
-			if threaded && first[g.Thread] != g.Name {
-				lines = append(lines, s.muted.Render("↳ reply in a thread"))
-			}
 			if g.Quoted != "" {
 				// a reply quoting another message, as Chat shows it
 				who, what := "", "a message"
@@ -647,10 +640,6 @@ func (m *Model) chatLines(w int) []string {
 			}
 			if len(g.Files) > 0 {
 				lines = append(lines, s.muted.Render("v saves · V opens"))
-			}
-			if threaded && first[g.Thread] == g.Name && threadCount[g.Thread] > 1 {
-				lines = append(lines, s.muted.Render(fmt.Sprintf("↳ %d %s in this thread", threadCount[g.Thread]-1,
-					map[bool]string{true: "reply", false: "replies"}[threadCount[g.Thread] == 2])))
 			}
 			gbar := bar
 			if g.Name == m.flashMsg {

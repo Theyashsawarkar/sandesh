@@ -524,14 +524,12 @@ func (m *Model) replyTarget() *store.ChatMessage {
 	return nil
 }
 
-// quoteInto makes the message a reply to replyTo: quoting it, and in its
-// thread where the space uses threads.
+// quoteInto makes the message a reply to replyTo by quoting it, the way
+// Chat's own reply does: it stays in the conversation, not in a thread
+// (Google reports every space as threaded, so that can't decide it).
 func (m *Model) quoteInto(out *store.Outgoing, sp store.Space) {
 	if r := m.replyTo; r != nil && r.Space == sp.Name {
 		out.Quote = r.Name
-		if sp.Threaded {
-			out.Thread = r.Thread
-		}
 	}
 }
 

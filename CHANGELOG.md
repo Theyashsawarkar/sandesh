@@ -11,7 +11,8 @@ Newest first.
   copies and `v` saves the picked message.
 - **Quoted replies show**: a message that quotes another shows it above
   (`❝ You: …`); recent chats are fetched again once to fill this in.
-- Thread labels ("reply in a thread") only in spaces that use threads.
+- No more "reply in a thread" labels: Google reports every space as
+  threaded, and replies show inline as quotes, as in the browser.
 
 - **Name a group**: starting a chat with two or more people asks for a name
   (named: a space; unnamed: a group chat), and `n` names an existing group

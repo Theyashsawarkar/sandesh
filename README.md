@@ -277,11 +277,10 @@ page (with `pdftotext`). `Tab` picks several, `Enter` adds them.
 **Replying to a message in chat**: `Enter` (or `2`) on a chat moves into
 the conversation; `j` / `k` now pick a message (highlighted) instead of
 scrolling. `r` replies to the picked one: the message box shows "↩ replying
-to …", and the reply quotes it the way Google Chat does (in a threaded
-space it also goes into that message's thread). From the list, `r` replies
+to …", and the reply quotes it the way Google Chat's own reply does, right in
+the conversation. From the list, `r` replies
 to the latest message from someone else. Replies others send that quote a
-message show the quote above them (`❝ You: …`). "Reply in a thread" labels
-only appear in spaces that use threads.
+message show the quote above them (`❝ You: …`).
 
 **Starting a conversation** (`N` in chat): type a name and pick the
 person (people from chat, contacts from mail, and your Workspace
