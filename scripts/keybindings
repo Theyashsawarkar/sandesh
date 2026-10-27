@@ -29,7 +29,14 @@
 # keybind: Tmux/sandesh | L | Add or remove a label (fzf picker)
 # keybind: Tmux/sandesh | x | Select the thread for e / d / m / M
 # keybind: Tmux/sandesh | i | Start typing a chat message right in the preview (Ctrl+t sends it later)
-# keybind: Tmux/sandesh | Enter / 2 (chat) | Pick messages in the chat with j/k (r replies to one, y copies it, v saves its files)
+# keybind: Tmux/sandesh | Enter / 2 (chat) | Pick messages in the chat with j/k (k past the first loads earlier ones)
+# keybind: Tmux/sandesh | e (picking) | Add a reaction to the picked message (👍 ❤️ 😂 🎉 …; 1-0 picks)
+# keybind: Tmux/sandesh | E (picking) | Edit your picked message in the message box
+# keybind: Tmux/sandesh | d d (picking) | Delete your picked message, for everyone
+# keybind: Tmux/sandesh | p | Toggle the chat pinned on top of the list
+# keybind: Tmux/sandesh | [ / ] | Switch to the previous / next chat (staying in the conversation)
+# keybind: Tmux/sandesh | Ctrl+k | Open the chat switcher (search chats, people and messages)
+# keybind: Tmux/sandesh | Ctrl+o (typing) | Add a file to the chat message you're typing
 # keybind: Tmux/sandesh | t | Move a scheduled send to another time (in Scheduled; Enter edits it)
 # keybind: Tmux/sandesh | n | Rename the chat (spaces and groups on Google Chat; a DM only here)
 # keybind: Tmux/sandesh | N | Start a conversation (opens the one you have with them, earlier messages and all)

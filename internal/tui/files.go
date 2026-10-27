@@ -153,6 +153,10 @@ func (m Model) afterPick(msg pickedFilesMsg) (tea.Model, tea.Cmd) {
 		files = append(files, store.File{Source: tilde(p)})
 	}
 	switch msg.then {
+	case "chatbox":
+		m.chatFiles = append(m.chatFiles, files...)
+		m.mode = modeChatMsg
+		return m, nil
 	case "compose":
 		if m.comp != nil {
 			m.comp.files = append(m.comp.files, files...)

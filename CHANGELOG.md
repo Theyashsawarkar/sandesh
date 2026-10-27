@@ -4,6 +4,18 @@ Newest first.
 
 ## Unreleased
 
+- **Chat, redone as bubbles** (option A from the mockup): theirs left,
+  yours right; quotes, files and numbered links inside the bubble;
+  reactions underneath; "(edited)"; a red "new" line where unread starts
+  (the chat opens there); who's in the chat on top.
+- **Chat list in groups**: pinned (`p`), today, earlier; `@N` badges for
+  unread mentions of you.
+- **More on a picked message**: `e` reacts (an emoji window), `E` edits
+  yours, `d d` deletes yours; `k` past the first message loads 50 earlier
+  ones.
+- `[` / `]` move between chats without leaving the conversation; `Ctrl+k`
+  opens the chat switcher; `Ctrl+o` adds files to the message you're typing.
+
 - **Reply to a specific chat message**: Enter (or 2) on a chat lets j/k pick
   messages; `r` replies to the picked one, quoting it like Google Chat
   (quotedMessageMetadata), with "↩ replying to …" over the message box;

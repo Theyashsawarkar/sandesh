@@ -85,6 +85,8 @@ func press(m Model, keys ...string) Model {
 			msg = tea.KeyMsg{Type: tea.KeyShiftTab}
 		case "ctrl+t":
 			msg = tea.KeyMsg{Type: tea.KeyCtrlT}
+		case "ctrl+u":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlU}
 		case "backspace":
 			msg = tea.KeyMsg{Type: tea.KeyBackspace}
 		default:
@@ -437,7 +439,7 @@ func TestChatReplies(t *testing.T) {
 	}
 	v := m.View()
 	// Priya's message quotes yours
-	if !strings.Contains(v, "❝") || !strings.Contains(v, "sent you the 3.8 notes") {
+	if !strings.Contains(v, "You · sent you the 3.8 notes") {
 		t.Fatalf("the quote isn't shown:\n%s", v)
 	}
 	// an unthreaded DM shows no thread labels
@@ -464,5 +466,70 @@ func TestChatReplies(t *testing.T) {
 	m = press(m, "1", "r")
 	if m.replyTo == nil || m.replyTo.Mine {
 		t.Fatalf("list reply target: %+v", m.replyTo)
+	}
+}
+
+func TestChatExtras(t *testing.T) {
+	m := model(t)
+	g := lastFake
+	g.AddChat(fake.ChatMessage{Space: "spaces/dm-priya", Sender: "users/2", Text: "from last month", Created: time.Now().AddDate(0, -1, 0)})
+	m = press(m, "tab") // Priya's DM
+	v := m.View()
+	if !strings.Contains(v, "new") || !strings.Contains(v, "You, Priya Kulkarni · 2 people") {
+		t.Fatalf("new line / people header:\n%s", v)
+	}
+	// react to her message
+	m = press(m, "enter", "e")
+	if m.mode != modeReact || !strings.Contains(m.View(), "react") {
+		t.Fatal("e should open the reactions")
+	}
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")}) // 🎉
+	m = runCmds(nm.(Model), cmd)
+	if !strings.Contains(m.View(), "🎉 1") {
+		t.Fatalf("reaction not shown:\n%s", m.View())
+	}
+	// edit and delete your own message
+	m = press(m, "k")
+	if !m.chatMsgs[m.chatSel].Mine {
+		t.Fatalf("picked: %+v", m.chatMsgs[m.chatSel])
+	}
+	m = press(m, "E", "ctrl+u")
+	m = typeText(m, "sent you the notes (v2)")
+	nm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = runCmds(nm.(Model), cmd)
+	if !strings.Contains(m.View(), "(v2)") || !strings.Contains(m.View(), "(edited)") {
+		t.Fatalf("edit:\n%s", m.View())
+	}
+	m = press(m, "enter") // back to picking (focus)
+	m.chatSel = 0
+	for i, c := range m.chatMsgs {
+		if c.Mine {
+			m.chatSel = i
+		}
+	}
+	m = press(m, "d")
+	nm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = runCmds(nm.(Model), cmd)
+	for _, c := range m.chatMsgs {
+		if c.Mine {
+			t.Fatal("d d should delete your message")
+		}
+	}
+	// k past the first message loads earlier ones
+	m.chatSel = 0
+	nm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	m = runCmds(nm.(Model), cmd)
+	if m.chatMsgs[0].Text != "from last month" {
+		t.Fatalf("earlier messages: %+v", m.chatMsgs[0])
+	}
+	// pin, and [ ] between chats
+	m = press(m, "1", "j", "p")
+	if !m.spaces[0].Pinned || !strings.Contains(m.View(), "PINNED") {
+		t.Fatalf("pin:\n%s", m.View())
+	}
+	before := m.sel
+	m = press(m, "]")
+	if m.sel != before+1 {
+		t.Fatal("] should go to the next chat")
 	}
 }

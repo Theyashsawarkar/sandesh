@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/Theyashsawarkar/sandesh/internal/google"
 	"github.com/Theyashsawarkar/sandesh/internal/mime"
+	"strconv"
 	"strings"
 
 	"context"
@@ -258,6 +259,96 @@ func (a *App) Reauthorize(ctx context.Context, account string, say func(url stri
 		return err
 	}
 	return a.SignIn(ctx, acc.Name, acc.Email, acc.Chat, say)
+}
+
+// chatWrite maps Chat's refusals to something to do about them.
+func chatWrite(err error) error {
+	switch {
+	case google.IsChatAppMissing(err):
+		return errors.New("Google Chat isn't set up in your Cloud project (Chat API → Configuration)")
+	case google.IsMissingScope(err):
+		return fmt.Errorf("%w: this needs it", ErrNeedsSignIn)
+	}
+	return err
+}
+
+// React adds an emoji reaction to a chat message.
+func (a *App) React(ctx context.Context, account, msg, emoji string) error {
+	c, err := a.Client(account)
+	if err != nil {
+		return err
+	}
+	if err := c.React(ctx, msg, emoji); err != nil {
+		return chatWrite(err)
+	}
+	// count it here at once; the next sync has Google's total
+	m, err := a.Store.ChatMessage(account, msg)
+	if err == nil {
+		_ = a.Store.SetReactions(account, msg, addReaction(m.Reactions, emoji))
+	}
+	return nil
+}
+
+func addReaction(summary, emoji string) string {
+	parts := []string{}
+	found := false
+	for _, p := range strings.Split(summary, " · ") {
+		if p == "" {
+			continue
+		}
+		e, n, _ := strings.Cut(p, " ")
+		if e == emoji {
+			k, _ := strconv.Atoi(n)
+			p = fmt.Sprintf("%s %d", e, k+1)
+			found = true
+		}
+		parts = append(parts, p)
+	}
+	if !found {
+		parts = append(parts, emoji+" 1")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// EditChatMessage changes the text of a message you sent.
+func (a *App) EditChatMessage(ctx context.Context, account, msg, text string) error {
+	c, err := a.Client(account)
+	if err != nil {
+		return err
+	}
+	if err := c.EditMessage(ctx, msg, text); err != nil {
+		return chatWrite(err)
+	}
+	return a.Store.EditChatText(account, msg, mime.Clean(text))
+}
+
+// DeleteChatMessage deletes a message you sent.
+func (a *App) DeleteChatMessage(ctx context.Context, account, msg string) error {
+	c, err := a.Client(account)
+	if err != nil {
+		return err
+	}
+	if err := c.DeleteMessage(ctx, msg); err != nil && !google.IsNotFound(err) {
+		return chatWrite(err)
+	}
+	return a.Store.DeleteChatMessage(account, msg)
+}
+
+// LoadOlderChat fetches up to n messages from before the oldest one here.
+func (a *App) LoadOlderChat(ctx context.Context, account, space string, before int64, n int) (int, error) {
+	c, err := a.Client(account)
+	if err != nil {
+		return 0, err
+	}
+	msgs, err := c.OlderMessages(ctx, space, time.UnixMilli(before), n)
+	if err != nil {
+		return 0, err
+	}
+	var out []store.ChatMessage
+	for _, m := range msgs {
+		out = append(out, a.chatMessage(ctx, c, account, space, m))
+	}
+	return len(out), a.Store.PutChatMessages(out)
 }
 
 // Retry sends a failed message again (straight away).

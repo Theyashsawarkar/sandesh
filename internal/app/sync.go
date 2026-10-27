@@ -593,6 +593,8 @@ func (a *App) chatMessage(ctx context.Context, c *google.Client, account, space 
 	if q := m.QuotedMessageMetadata; q != nil {
 		cm.Quoted = q.Name
 	}
+	cm.Reactions = reactionSummary(m)
+	cm.Edited = m.LastUpdateTime != "" && m.LastUpdateTime != m.CreateTime
 	for _, at := range m.Attachment {
 		f := store.ChatFile{Name: mime.Clean(at.ContentName), Type: at.ContentType}
 		if at.AttachmentDataRef != nil {
@@ -604,6 +606,17 @@ func (a *App) chatMessage(ctx context.Context, c *google.Client, account, space 
 		cm.Files = append(cm.Files, f)
 	}
 	return cm
+}
+
+// reactionSummary is "👍 2 · 😂 1".
+func reactionSummary(m google.ChatMsg) string {
+	var parts []string
+	for _, r := range m.EmojiReactionSummaries {
+		if r.Emoji.Unicode != "" && r.ReactionCount > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", r.Emoji.Unicode, r.ReactionCount))
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 // findMe intersects the members of a few DMs: the one user in all of them

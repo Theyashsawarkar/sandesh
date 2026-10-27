@@ -235,7 +235,14 @@ The screen opens in **normal mode**: letters are commands. `/`, `s` and
 | `L` | Add or remove a label (fzf picker) |
 | `x` | Select the thread for e / d / m / M |
 | `i` | Start typing a chat message right in the preview (Ctrl+t sends it later) |
-| `Enter` / `2` (chat) | Pick messages in the chat with j/k (r replies to one, y copies it, v saves its files) |
+| `Enter` / `2` (chat) | Pick messages in the chat with j/k (k past the first loads earlier ones) |
+| `e` (picking) | Add a reaction to the picked message (👍 ❤️ 😂 🎉 …; 1-0 picks) |
+| `E` (picking) | Edit your picked message in the message box |
+| `d d` (picking) | Delete your picked message, for everyone |
+| `p` | Toggle the chat pinned on top of the list |
+| `[` / `]` | Switch to the previous / next chat (staying in the conversation) |
+| `Ctrl+k` | Open the chat switcher (search chats, people and messages) |
+| `Ctrl+o` (typing) | Add a file to the chat message you're typing |
 | `t` | Move a scheduled send to another time (in Scheduled; Enter edits it) |
 | `n` | Rename the chat (spaces and groups on Google Chat; a DM only here) |
 | `N` | Start a conversation (opens the one you have with them, earlier messages and all) |
@@ -273,6 +280,14 @@ home or Downloads, `Ctrl+h` shows hidden ones). Type to narrow it down; the
 right side previews the highlighted file: text with line numbers, an
 image's size (the picture itself with `chafa` installed), a PDF's first
 page (with `pdftotext`). `Tab` picks several, `Enter` adds them.
+
+**The conversation** is drawn as bubbles: theirs on the left under their
+name, yours on the right in the accent colour, a reply's quote inside its
+bubble, files and numbered links (`o` opens one) inside too, reactions as
+chips underneath and "(edited)" where a message was changed. A red **new**
+line marks where what you haven't read starts, and the chat opens there.
+The top line lists who's in it. The chat list is grouped (pinned, today,
+earlier); a chat that mentions you shows a peach `@N` badge.
 
 **Replying to a message in chat**: `Enter` (or `2`) on a chat moves into
 the conversation; `j` / `k` now pick a message (highlighted) instead of

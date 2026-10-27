@@ -38,6 +38,7 @@ const (
 	modePick    // the file picker
 	modeWhen    // picking when to send
 	modeConvo   // picking people for a new conversation
+	modeReact   // picking an emoji for a reaction
 	modeCompose // the compose screen
 	modeFind    // the search window
 )
@@ -123,7 +124,16 @@ type Model struct {
 	pick          *picker
 	when          *whenPicker
 	convo         *convoPicker
-	chatSel       int                // the message picked in a chat (when the conversation has focus)
+	chatSel       int              // the message picked in a chat (when the conversation has focus)
+	newMark       map[string]int64 // per chat: what was read when it was opened (the "new" line)
+	mentions      map[string]int   // per chat: unread messages that mention you
+	chatFiles     []store.File     // files for the message being typed
+	editingMsg    string           // the message of yours being edited in the box
+	armDelete     string           // d pressed once on this message
+	reactSel      int              // the emoji picked in the reaction window
+	chatLimit     int              // how many messages of this chat to show (grows as older ones load)
+	newLine       int              // where the "new" line is in the preview (0: none)
+	scrollToNew   bool
 	replyTo       *store.ChatMessage // the message the one being typed replies to
 	pickMode      mode               // where the picker goes back to
 	helpQ         string             // filtering the keys popup
@@ -252,6 +262,16 @@ func (m *Model) reload() {
 		m.spaces = out
 	} else {
 		m.outboxRows = nil
+		m.mentions = map[string]int{}
+		for _, acc := range m.a.AccountNames() {
+			if a, err := m.a.Store.Account(acc); err == nil && a.ChatUser != "" {
+				if me, _, ok := m.a.Store.User(acc, a.ChatUser); ok {
+					for sp, n := range m.a.Store.MentionCounts(acc, firstWord(me)) {
+						m.mentions[acc+"/"+sp] = n
+					}
+				}
+			}
+		}
 		var out []store.Space
 		for _, s := range sps {
 			switch chatSections[m.sec%len(chatSections)] {
@@ -273,6 +293,8 @@ func (m *Model) reload() {
 			}
 			out = append(out, s)
 		}
+		// pinned ones first, the rest as they come (most recent first)
+		sort.SliceStable(out, func(i, j int) bool { return out[i].Pinned && !out[j].Pinned })
 		m.spaces = out
 	}
 	m.waiting, _ = m.a.Store.Outbox(store.StatusApproval)
@@ -456,6 +478,7 @@ func (m *Model) loadPreview(reset bool) {
 	key := m.keyAt(m.sel)
 	if key != m.curKey {
 		reset = true
+		m.chatLimit, m.armDelete = 0, ""
 	}
 	m.curKey = key
 	m.msgs, m.chatMsgs = nil, nil
@@ -463,13 +486,26 @@ func (m *Model) loadPreview(reset bool) {
 		m.msgs, _ = m.a.Store.Messages(t.Account, t.ID)
 	}
 	if s, ok := m.curSpace(); ok {
-		m.chatMsgs, _ = m.a.Store.ChatMessages(s.Account, s.Name, 200)
+		m.chatMsgs, _ = m.a.Store.ChatMessages(s.Account, s.Name, max(200, m.chatLimit))
 	}
 	if reset {
 		m.expandAll, m.showQuoted = false, false
 		m.scroll = 0
 		if m.tab == tabChat {
 			m.scroll = 1 << 30 // clamped to the bottom when drawn
+			if sp, ok := m.curSpace(); ok {
+				if m.newMark == nil {
+					m.newMark = map[string]int64{}
+				}
+				k := sp.Account + "/" + sp.Name
+				if _, seen := m.newMark[k]; !seen {
+					m.newMark[k] = 0
+					if sp.Unread > 0 {
+						m.newMark[k] = sp.LastRead
+						m.scrollToNew = true
+					}
+				}
+			}
 		}
 	}
 }
@@ -496,8 +532,12 @@ func (m *Model) pickingMsg() bool {
 	return ok && m.focus == 1 && len(m.chatMsgs) > 0
 }
 
-// moveChatSel picks another message and keeps it in view.
-func (m *Model) moveChatSel(step int) {
+// moveChatSel picks another message and keeps it in view; going up past
+// the first one loads earlier messages.
+func (m *Model) moveChatSel(step int) tea.Cmd {
+	if step < 0 && m.chatSel == 0 {
+		return m.loadOlderChat()
+	}
 	m.chatSel = max(0, min(len(m.chatMsgs)-1, m.chatSel+step))
 	m.fixView()
 	if line, ok := m.chatMsgLine[m.chatMsgs[m.chatSel].Name]; ok {
@@ -507,6 +547,7 @@ func (m *Model) moveChatSel(step int) {
 			m.fixView()
 		}
 	}
+	return nil
 }
 
 // replyTarget: the picked message, or else the latest one from someone else.
@@ -816,6 +857,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case convoMsg:
 		return m.gotConvo(msg)
+	case olderChatMsg:
+		return m.gotOlderChat(msg)
 	case signedInMsg:
 		return m.gotSignedIn(msg)
 	case convoURLMsg:
@@ -875,6 +918,9 @@ func (m *Model) fixView() {
 	if _, ok := m.curSpace(); ok {
 		avail -= 2
 	}
+	if m.scrollToNew && m.newLine > 0 {
+		m.scroll, m.scrollToNew = max(0, m.newLine-2), false
+	}
 	bottom := max(0, len(m.preview)-max(3, avail))
 	m.scroll = max(0, min(m.scroll, bottom))
 	m.atBottom = m.scroll >= bottom
@@ -896,6 +942,16 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.mode == modeConvo && m.convo != nil {
 		return m.convoKey(k)
+	}
+	if m.mode == modeChatMsg && s == "ctrl+o" {
+		return m, m.pickFiles("chatbox")
+	}
+	if m.mode == modeChatMsg && s == "backspace" && len(m.input) == 0 && len(m.chatFiles) > 0 {
+		m.chatFiles = m.chatFiles[:len(m.chatFiles)-1]
+		return m, nil
+	}
+	if m.mode == modeReact {
+		return m.reactKey(s)
 	}
 	// Ctrl+t while typing a chat message: send it later
 	if m.mode == modeChatMsg && s == "ctrl+t" {
@@ -932,7 +988,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) inputKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.Type {
 	case tea.KeyEsc:
-		m.replyTo = nil
+		m.replyTo, m.editingMsg, m.chatFiles = nil, "", nil
 		if m.mode == modeFilter {
 			m.filter = ""
 			m.reload()
@@ -974,8 +1030,15 @@ func (m Model) inputKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case modeDraftHint:
 			return m, m.aiDraft(text)
 		case modeChatMsg:
-			if sp, ok := m.curSpace(); ok && text != "" {
-				out := store.Outgoing{Space: sp.Name, SpaceName: cli.SpaceTitle(sp), Body: text}
+			if name := m.editingMsg; name != "" {
+				sp, _ := m.curSpace()
+				m.editingMsg = ""
+				a := m.a
+				return m, m.act("edited", func(ctx context.Context) error { return a.EditChatMessage(ctx, sp.Account, name, text) })
+			}
+			if sp, ok := m.curSpace(); ok && (text != "" || len(m.chatFiles) > 0) {
+				out := store.Outgoing{Space: sp.Name, SpaceName: cli.SpaceTitle(sp), Body: text, Files: m.chatFiles}
+				m.chatFiles = nil
 				m.quoteInto(&out, sp)
 				it, err := m.a.Queue(sp.Account, "chat", out, app.OriginYou)
 				if err != nil {
@@ -1060,7 +1123,7 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		m.mode = modeHelp
 	case "j", "down":
 		if m.pickingMsg() {
-			m.moveChatSel(1)
+			return m, m.moveChatSel(1)
 		} else if m.focus == 1 {
 			m.scroll++
 		} else if m.tab == tabMail && m.sel >= m.count()-1 && m.count() > 0 {
@@ -1072,7 +1135,7 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		}
 	case "k", "up":
 		if m.pickingMsg() {
-			m.moveChatSel(-1)
+			return m, m.moveChatSel(-1)
 		} else if m.focus == 1 {
 			m.scroll = max(0, m.scroll-1)
 		} else if m.sel > 0 {
@@ -1082,7 +1145,7 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		}
 	case "g":
 		if m.pickingMsg() {
-			m.moveChatSel(-len(m.chatMsgs))
+			return m, m.moveChatSel(-len(m.chatMsgs))
 		} else if m.focus == 1 {
 			m.scroll = 0
 		} else {
@@ -1091,7 +1154,7 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		}
 	case "G":
 		if m.pickingMsg() {
-			m.moveChatSel(len(m.chatMsgs))
+			return m, m.moveChatSel(len(m.chatMsgs))
 		} else if m.focus == 1 {
 			m.scroll = 1 << 30
 		} else {
@@ -1231,6 +1294,27 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "e", "d", "*":
+		if m.pickingMsg() {
+			c := m.chatMsgs[m.chatSel]
+			switch s {
+			case "e": // react to it
+				m.mode, m.reactSel = modeReact, 0
+			case "d": // delete it (yours), d twice
+				if !c.Mine {
+					m.say("only your own messages can be deleted")
+					return m, nil
+				}
+				if m.armDelete != c.Name {
+					m.armDelete = c.Name
+					m.say("d again deletes it, for everyone")
+					return m, nil
+				}
+				m.armDelete = ""
+				a := m.a
+				return m, m.act("deleted", func(ctx context.Context) error { return a.DeleteChatMessage(ctx, c.Account, c.Name) })
+			}
+			return m, nil
+		}
 		return m, m.modify(s)
 	case "m", "M":
 		read := s == "m"
@@ -1248,6 +1332,17 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		m.showQuoted = !m.showQuoted
 		m.say(map[bool]string{true: "showing quoted text", false: "quoted text folded"}[m.showQuoted])
 	case "E":
+		if m.pickingMsg() {
+			// in a chat: edit the picked message (yours)
+			c := m.chatMsgs[m.chatSel]
+			if !c.Mine {
+				m.say("only your own messages can be edited")
+				return m, nil
+			}
+			m.editingMsg, m.replyTo = c.Name, nil
+			m.mode, m.input = modeChatMsg, []rune(c.Text)
+			return m, nil
+		}
 		m.expandAll = !m.expandAll
 	case "o":
 		switch len(m.links) {
@@ -1284,6 +1379,28 @@ func (m Model) normalKey(s string) (tea.Model, tea.Cmd) {
 		if m.tab == tabChat {
 			m.openConvo()
 		}
+	case "p":
+		if sp, ok := m.curSpace(); ok {
+			_ = m.a.Store.SetPinned(sp.Account, sp.Name, !sp.Pinned)
+			m.reload()
+			m.say(map[bool]string{true: "pinned on top", false: "unpinned"}[!sp.Pinned])
+		}
+	case "[", "]":
+		if m.tab == tabChat && m.count() > 0 {
+			step := map[bool]int{true: -1, false: 1}[s == "["]
+			m.sel = max(0, min(m.count()-1, m.sel+step))
+			m.loadPreview(true)
+			if m.focus == 1 {
+				m.chatSel = len(m.chatMsgs) - 1
+			}
+			m.fixView()
+		}
+	case "ctrl+k":
+		m.tab = tabChat
+		m.openFinder()
+		m.find.scope = scopeAllChat
+		m.find.placeholder()
+
 	case "t":
 		if it, ok := m.curOutbox(); ok && it.Status == store.StatusQueued {
 			m.openWhen("outbox")

@@ -197,7 +197,28 @@ func (m *Model) listView(w, h int) string {
 	cw := w - 6 // card inner width: margins, borders and padding on both sides
 	var out []string
 	visible := max(1, (h-1)/m.cardRows())
+	group := func(i int) string { // chat list: pinned, today, earlier
+		if m.tab != tabChat || i >= len(m.spaces) || strings.HasPrefix(m.spaces[i].Name, outboxPrefix) {
+			return ""
+		}
+		sp := m.spaces[i]
+		switch {
+		case sp.Pinned:
+			return "pinned"
+		case dayName(time.UnixMilli(sp.LastActive)) == "Today":
+			return "today"
+		}
+		return "earlier"
+	}
 	for i := m.offset; i < min(m.count(), m.offset+visible); i++ {
+		if g := group(i); g != "" && (i == m.offset || g != group(i-1)) {
+			label := " " + s.muted.Bold(true).Render(strings.ToUpper(g))
+			if len(out) > 0 && out[len(out)-1] == "" {
+				out[len(out)-1] = label // in the gap above the card
+			} else {
+				out = append(out, label)
+			}
+		}
 		sel := i == m.sel
 		border := s.c.Border
 		if sel && m.focus == 0 {
@@ -293,7 +314,14 @@ func (m *Model) listView(w, h int) string {
 			}
 			title := s.sub.Render(name)
 			if sp.Unread > 0 {
-				title = s.bold.Render(name) + s.peach.Render(fmt.Sprintf(" %d", sp.Unread))
+				title = s.bold.Render(name) + " " + s.round(s.pill, fmt.Sprint(sp.Unread))
+			}
+			if n := m.mentions[sp.Account+"/"+sp.Name]; n > 0 {
+				badge := lipgloss.NewStyle().Background(lipgloss.Color(s.c.Peach)).Foreground(lipgloss.Color(s.c.Base)).Bold(true)
+				title = s.bold.Render(name) + " " + s.round(badge, fmt.Sprintf("@%d", n))
+			}
+			if sp.Pinned {
+				title += s.accent.Render(" 📌")
 			}
 			last := oneLine(sp.LastText)
 			if sp.LastSender != "" {
@@ -554,49 +582,61 @@ func wrap(text string, w int) []string {
 
 var reMention = regexp.MustCompile(`@[\p{L}\p{N}_.-]+`)
 
-// chatLines draws a conversation: a day line, then groups of messages by
-// sender (name and time once, then each message behind a coloured bar);
-// yours sit on the right with a green bar.
+// chatLines draws a conversation as bubbles: a day line; a red "new" line
+// where what you haven't read starts; then runs of messages by sender
+// (name and time once), each message a rounded bubble: theirs on the left,
+// yours on the right in the accent colour. Inside: the quote a reply
+// answers, the text (mentions marked, links numbered for o), files, and
+// "edited"; reactions under it. The picked message has a bold border.
 func (m *Model) chatLines(w int) []string {
 	m.chatMsgLine = map[string]int{}
+	s := m.styles
+	if len(m.chatMsgs) == 0 {
+		return []string{s.muted.Render("No recent messages synced.")}
+	}
 	byName := map[string]store.ChatMessage{}
 	for _, c := range m.chatMsgs {
 		byName[c.Name] = c
 	}
 	picking := m.pickingMsg()
-	s := m.styles
-	if len(m.chatMsgs) == 0 {
-		return []string{s.muted.Render("No recent messages synced.")}
-	}
-	threadCount := map[string]int{}
-	first := map[string]string{}
+	// who's here (from who wrote), at the top
+	seen := map[string]bool{"You": true}
+	people := []string{"You"}
 	for _, c := range m.chatMsgs {
-		threadCount[c.Thread]++
-		if _, ok := first[c.Thread]; !ok {
-			first[c.Thread] = c.Name
+		if !c.Mine && c.SenderName != "" && !seen[c.SenderName] {
+			seen[c.SenderName] = true
+			people = append(people, c.SenderName)
 		}
+	}
+	head := []string{s.muted.Render(ansi.Truncate(strings.Join(people, ", "), w-14, "…") + fmt.Sprintf(" · %d people", len(people)))}
+	newSince := int64(0)
+	if sp, ok := m.curSpace(); ok {
+		newSince = m.newMark[sp.Account+"/"+sp.Name]
 	}
 	mentionStyle := lipgloss.NewStyle().Background(lipgloss.Color(s.c.Accent)).Foreground(lipgloss.Color(s.c.Base))
 	mention := func(t string) string { return s.round(mentionStyle, t) }
-	var out []string
+	bw := max(24, w*72/100) // a bubble's widest
+	out := head
 	var lastDay string
-	bw := max(20, w*4/5)
+	newShown := false
+	m.newLine = 0
 	for i := 0; i < len(m.chatMsgs); {
 		c := m.chatMsgs[i]
 		t := time.UnixMilli(c.Created)
 		if day := dayName(t); day != lastDay {
 			lastDay = day
-			label := " " + day + " "
-			side := max(2, (w-lipgloss.Width(label))/2)
-			if len(out) > 0 {
-				out = append(out, "")
-			}
-			out = append(out, s.muted.Render(strings.Repeat("─", side)+label+strings.Repeat("─", max(0, w-side-lipgloss.Width(label)))))
+			out = append(out, "", divider(day, w, s.muted))
 		}
-		// a group: same sender, same day, each within 10 minutes of the last
+		if !newShown && newSince > 0 && !c.Mine && c.Created > newSince {
+			newShown = true
+			m.newLine = len(out)
+			out = append(out, divider("new", w, s.red))
+		}
+		// a run: same sender, same day, each within 10 minutes of the last
 		j := i + 1
 		for j < len(m.chatMsgs) && m.chatMsgs[j].Sender == c.Sender && m.chatMsgs[j].Created-m.chatMsgs[j-1].Created < 10*60*1000 &&
-			dayName(time.UnixMilli(m.chatMsgs[j].Created)) == lastDay {
+			dayName(time.UnixMilli(m.chatMsgs[j].Created)) == lastDay &&
+			!(newSince > 0 && !newShown && !m.chatMsgs[j].Mine && m.chatMsgs[j].Created > newSince) {
 			j++
 		}
 		name := c.SenderName
@@ -605,23 +645,17 @@ func (m *Model) chatLines(w int) []string {
 		}
 		ac := s.avatarColors()
 		color := ac[hash(name)%len(ac)]
-		if c.Mine {
-			color = s.c.Green
-		}
-		bar := fg(color).Bold(true).Render("┃")
 		out = append(out, "")
-		head := m.avatar(name) + " " + fg(color).Bold(true).Render(name) + " " + s.muted.Render(t.Format("15:04"))
 		if c.Mine {
-			head = s.muted.Render(t.Format("15:04")) + " " + fg(color).Bold(true).Render(name) + " " + m.avatar(name)
-			out = append(out, padLeft(head, w))
+			out = append(out, padLeft(s.muted.Render("You · "+t.Format("15:04")), w))
 		} else {
-			out = append(out, head)
+			out = append(out, m.avatar(name)+" "+fg(color).Bold(true).Render(name)+s.muted.Render(" · "+t.Format("15:04")))
 		}
 		for k, g := range m.chatMsgs[i:j] {
 			m.chatMsgLine[g.Name] = len(out)
+			sel := picking && i+k == m.chatSel
 			var lines []string
 			if g.Quoted != "" {
-				// a reply quoting another message, as Chat shows it
 				who, what := "", "a message"
 				if q, ok := byName[g.Quoted]; ok {
 					who, what = q.SenderName, oneLine(q.Text)
@@ -629,39 +663,104 @@ func (m *Model) chatLines(w int) []string {
 						who = "You"
 					}
 				}
-				lines = append(lines, s.muted.Render("┊ ❝ ")+s.sub.Bold(true).Render(who)+" "+s.muted.Render(ansi.Truncate(what, bw-lipgloss.Width(who)-6, "…")))
+				lines = append(lines, s.muted.Render("▏")+s.sub.Bold(true).Render(who)+s.muted.Render(" · "+ansi.Truncate(what, bw-lipgloss.Width(who)-8, "…")))
 			}
-			for _, l := range wrap(mime.Clean(g.Text), bw-3) {
+			text := mime.Clean(g.Text)
+			var files []string
+			for _, l := range strings.Split(text, "\n") {
 				if strings.HasPrefix(l, "📎 ") {
-					lines = append(lines, s.peach.Render(l))
-					continue
-				}
-				lines = append(lines, styleMentions(l, s.text, mention))
-			}
-			if len(g.Files) > 0 {
-				lines = append(lines, s.muted.Render("v saves · V opens"))
-			}
-			gbar := bar
-			if g.Name == m.flashMsg {
-				gbar = s.accent.Bold(true).Render("▶") // the one search opened
-			}
-			if picking && i+k == m.chatSel {
-				gbar = s.accent.Bold(true).Render("▌") // the picked one: r replies to it
-				for x := range lines {
-					lines[x] = s.accent.Bold(true).Render(stripANSI(lines[x]))
+					files = append(files, strings.TrimPrefix(l, "📎 "))
 				}
 			}
-			for _, l := range lines {
-				if c.Mine {
-					out = append(out, padLeft(l+" "+gbar, w))
+			var body []string
+			for _, l := range strings.Split(text, "\n") {
+				if !strings.HasPrefix(l, "📎 ") {
+					body = append(body, l)
+				}
+			}
+			for _, l := range wrap(strings.Join(body, "\n"), bw-4) {
+				lines = append(lines, m.chatLinks(styleMentions(l, s.text, mention)))
+			}
+			if g.Edited && len(lines) > 0 {
+				lines[len(lines)-1] += s.muted.Render(" (edited)")
+			}
+			for _, f := range files {
+				lines = append(lines, "📎 "+s.peach.Render(ansi.Truncate(f, bw-16, "…"))+s.muted.Render(" · v saves"))
+			}
+			if len(lines) == 0 {
+				lines = []string{s.muted.Render("…")}
+			}
+			border := s.c.Border
+			if g.Mine {
+				border = s.c.Accent2
+			}
+			if sel || g.Name == m.flashMsg {
+				border = s.c.Accent
+			}
+			box := bubble(lines, bw, border, sel)
+			for _, l := range box {
+				if g.Mine {
+					out = append(out, padLeft(l, w))
 				} else {
-					out = append(out, m.indent()+gbar+" "+l)
+					out = append(out, m.indent()+l)
+				}
+			}
+			if g.Reactions != "" {
+				var chips []string
+				for _, r := range strings.Split(g.Reactions, " · ") {
+					chips = append(chips, s.muted.Render("‹")+s.sub.Render(r)+s.muted.Render("›"))
+				}
+				line := strings.Join(chips, " ")
+				if g.Mine {
+					out = append(out, padLeft(line, w))
+				} else {
+					out = append(out, m.indent()+" "+line)
 				}
 			}
 		}
 		i = j
 	}
 	return out
+}
+
+// bubble draws a rounded box around lines, as wide as the widest line.
+func bubble(lines []string, max_ int, color string, bold bool) []string {
+	b := fg(color)
+	if bold {
+		b = b.Bold(true)
+	}
+	iw := 0
+	for _, l := range lines {
+		iw = max(iw, lipgloss.Width(l))
+	}
+	iw = min(iw, max_-4)
+	out := []string{b.Render("╭" + strings.Repeat("─", iw+2) + "╮")}
+	for _, l := range lines {
+		out = append(out, b.Render("│")+" "+fit(l, iw)+" "+b.Render("│"))
+	}
+	return append(out, b.Render("╰"+strings.Repeat("─", iw+2)+"╯"))
+}
+
+func divider(label string, w int, st lipgloss.Style) string {
+	label = " " + label + " "
+	side := max(2, (w-lipgloss.Width(label))/2)
+	return st.Render(strings.Repeat("─", side) + label + strings.Repeat("─", max(0, w-side-lipgloss.Width(label))))
+}
+
+var reURL = regexp.MustCompile(`https?://[^\s<>"]+`)
+
+// chatLinks underlines the links in a line and numbers them for o.
+func (m *Model) chatLinks(l string) string {
+	plain := stripANSI(l)
+	if !reURL.MatchString(plain) {
+		return l
+	}
+	s := m.styles
+	out := reURL.ReplaceAllStringFunc(plain, func(u string) string {
+		m.links = append(m.links, u)
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(s.c.Blue)).Underline(true).Render(u) + s.muted.Render(fmt.Sprintf("[%d]", len(m.links)))
+	})
+	return s.text.Render("") + out
 }
 
 func hash(s string) int {
@@ -726,6 +825,19 @@ func (m Model) previewBox(w, h int) string {
 	if _, ok := m.curSpace(); ok {
 		if m.mode == modeChatMsg {
 			bottom = []string{s.muted.Render(strings.Repeat("─", inner)), s.accent.Render("› ") + s.text.Render(string(m.input)) + s.accent.Render("▏")}
+			var chips []string
+			if m.editingMsg != "" {
+				chips = append(chips, s.peach.Render("✎ editing your message")+s.muted.Render(" · enter saves · esc"))
+			}
+			for _, f := range m.chatFiles {
+				chips = append(chips, s.muted.Render("‹")+"📎 "+s.text.Render(f.Source[strings.LastIndex(f.Source, "/")+1:])+s.muted.Render("›"))
+			}
+			if len(m.chatFiles) > 0 {
+				chips = append(chips, s.muted.Render("backspace drops the last file"))
+			}
+			if len(chips) > 0 {
+				bottom = append([]string{bottom[0], ansi.Truncate(strings.Join(chips, "  "), inner, "…")}, bottom[1:]...)
+			}
 			if r := m.replyTo; r != nil {
 				who := r.SenderName
 				if r.Mine {

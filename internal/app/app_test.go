@@ -570,3 +570,46 @@ func cli0(sp store.Space) string {
 	}
 	return sp.DisplayName
 }
+
+func TestChatMessageActions(t *testing.T) {
+	a, g := setup(t)
+	ctx := context.Background()
+	if _, errs := a.SyncAll(ctx); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	msgs, _ := a.Store.ChatMessages("work", "spaces/dm-priya", 0)
+	var hers, mine store.ChatMessage
+	for _, m := range msgs {
+		if m.Mine {
+			mine = m
+		} else {
+			hers = m
+		}
+	}
+	if hers.Reactions != "👍 1" || hers.Quoted == "" {
+		t.Fatalf("synced reactions/quote: %+v", hers)
+	}
+	if err := a.React(ctx, "work", hers.Name, "🎉"); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := a.Store.ChatMessage("work", hers.Name); m.Reactions != "👍 1 · 🎉 1" {
+		t.Fatalf("local reaction: %q", m.Reactions)
+	}
+	if err := a.EditChatMessage(ctx, "work", mine.Name, "sent you the 3.8 notes (v2)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DeleteChatMessage(ctx, "work", mine.Name); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range g.Chat {
+		if m.Name == mine.Name {
+			t.Fatal("deleted on Google?")
+		}
+	}
+	// older messages: before the oldest here
+	g.AddChat(fake.ChatMessage{Space: "spaces/dm-priya", Sender: "users/2", Text: "from last month", Created: time.Now().AddDate(0, -1, 0)})
+	n, err := a.LoadOlderChat(ctx, "work", "spaces/dm-priya", hers.Created, 50)
+	if err != nil || n != 1 {
+		t.Fatalf("older: %d %v", n, err)
+	}
+}

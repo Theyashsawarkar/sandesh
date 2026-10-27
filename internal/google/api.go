@@ -569,6 +569,45 @@ type ChatMsg struct {
 		LastUpdateTime string `json:"lastUpdateTime"`
 	} `json:"quotedMessageMetadata,omitempty"`
 	LastUpdateTime string `json:"lastUpdateTime,omitempty"`
+	// emoji reactions, summed per emoji
+	EmojiReactionSummaries []struct {
+		Emoji struct {
+			Unicode string `json:"unicode"`
+		} `json:"emoji"`
+		ReactionCount int `json:"reactionCount"`
+	} `json:"emojiReactionSummaries,omitempty"`
+}
+
+// OlderMessages returns up to max messages created before t, oldest first.
+func (c *Client) OlderMessages(ctx context.Context, space string, before time.Time, max int) ([]ChatMsg, error) {
+	v := url.Values{"pageSize": {fmt.Sprint(min(1000, max))}, "orderBy": {"createTime desc"},
+		"filter": {fmt.Sprintf(`createTime < "%s"`, before.UTC().Format(time.RFC3339Nano))}}
+	var r struct {
+		Messages []ChatMsg `json:"messages"`
+	}
+	if err := c.do(ctx, "GET", c.chat+"/"+space+"/messages?"+v.Encode(), nil, &r); err != nil {
+		return nil, err
+	}
+	out := r.Messages
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
+// React adds an emoji reaction to a message.
+func (c *Client) React(ctx context.Context, msg, emoji string) error {
+	return c.do(ctx, "POST", c.chat+"/"+escapePath(msg)+"/reactions", map[string]any{"emoji": map[string]string{"unicode": emoji}}, nil)
+}
+
+// EditMessage changes the text of a message you sent.
+func (c *Client) EditMessage(ctx context.Context, msg, text string) error {
+	return c.do(ctx, "PATCH", c.chat+"/"+escapePath(msg)+"?updateMask=text", map[string]string{"text": text}, nil)
+}
+
+// DeleteMessage deletes a message you sent.
+func (c *Client) DeleteMessage(ctx context.Context, msg string) error {
+	return c.do(ctx, "DELETE", c.chat+"/"+escapePath(msg), nil, nil)
 }
 
 // GetChatMessage fetches one message (for its last update time, which a

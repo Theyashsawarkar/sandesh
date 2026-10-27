@@ -90,7 +90,7 @@ func Open(path string) (*Store, error) {
 }
 
 // schemaVersion: bump it with a step in migrate.
-const schemaVersion = 10
+const schemaVersion = 11
 
 func migrate(db *sql.DB) error {
 	var v int
@@ -178,6 +178,21 @@ func migrate(db *sql.DB) error {
 			}
 		}
 		if _, err := db.Exec(`UPDATE spaces SET synced_to=0 WHERE last_active > ?`, time.Now().AddDate(0, 0, -14).UnixMilli()); err != nil {
+			return err
+		}
+	}
+	if v < 11 {
+		// v11: reactions and edits on chat messages; spaces you pinned
+		for _, q := range []string{
+			`ALTER TABLE chat_messages ADD COLUMN reactions TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE chat_messages ADD COLUMN edited INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE spaces ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,
+		} {
+			if _, err := db.Exec(q); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+				return err
+			}
+		}
+		if _, err := db.Exec(`UPDATE spaces SET synced_to=0 WHERE last_active > ?`, time.Now().AddDate(0, 0, -7).UnixMilli()); err != nil {
 			return err
 		}
 	}
@@ -828,6 +843,7 @@ type Space struct {
 	DisplayName string `json:"name"`
 	Alias       string `json:"alias,omitempty"`    // your own name for it, on this machine
 	Threaded    bool   `json:"threaded,omitempty"` // replies go in threads (else inline)
+	Pinned      bool   `json:"pinned,omitempty"`   // kept on top of the list (on this machine)
 	Type        string `json:"type"`               // SPACE, GROUP_CHAT, DIRECT_MESSAGE
 	LastActive  int64  `json:"last_active"`
 	LastRead    int64  `json:"-"`
@@ -848,7 +864,9 @@ type ChatMessage struct {
 	Created    int64      `json:"time"`
 	Mine       bool       `json:"mine,omitempty"`
 	Files      []ChatFile `json:"files,omitempty"`
-	Quoted     string     `json:"quoted,omitempty"` // the message this one quotes (a reply)
+	Quoted     string     `json:"quoted,omitempty"`    // the message this one quotes (a reply)
+	Reactions  string     `json:"reactions,omitempty"` // "👍 2 · 😂 1"
+	Edited     bool       `json:"edited,omitempty"`
 }
 
 // ChatFile is a file in a chat message: Ref is Chat's media name (it can
@@ -922,8 +940,8 @@ func (s *Store) SearchChat(accounts []string, query string, limit int, space str
 func (s *Store) ChatMessage(account, name string) (ChatMessage, error) {
 	var m ChatMessage
 	var files string
-	err := s.db.QueryRow(`SELECT account,name,space,thread,sender,sender_name,text,created,files,quoted FROM chat_messages WHERE account=? AND name=?`, account, name).
-		Scan(&m.Account, &m.Name, &m.Space, &m.Thread, &m.Sender, &m.SenderName, &m.Text, &m.Created, &files, &m.Quoted)
+	err := s.db.QueryRow(`SELECT account,name,space,thread,sender,sender_name,text,created,files,quoted,reactions,edited FROM chat_messages WHERE account=? AND name=?`, account, name).
+		Scan(&m.Account, &m.Name, &m.Space, &m.Thread, &m.Sender, &m.SenderName, &m.Text, &m.Created, &files, &m.Quoted, &m.Reactions, &m.Edited)
 	if err != nil {
 		return m, err
 	}
@@ -934,6 +952,55 @@ func (s *Store) ChatMessage(account, name string) (ChatMessage, error) {
 // ResetDMTitles forgets DM and group titles so they are worked out again.
 func (s *Store) ResetDMTitles(account string) error {
 	_, err := s.db.Exec(`UPDATE spaces SET display_name='' WHERE account=? AND type<>'SPACE'`, account)
+	return err
+}
+
+// MentionCounts: per chat, unread messages that mention you (@name).
+func (s *Store) MentionCounts(account, name string) map[string]int {
+	out := map[string]int{}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return out
+	}
+	rows, err := s.db.Query(`SELECT c.space, COUNT(*) FROM chat_messages c JOIN spaces s ON s.account=c.account AND s.name=c.space
+	  JOIN accounts a ON a.name=c.account
+	  WHERE c.account=? AND c.created>s.last_read AND c.sender<>a.chat_user AND LOWER(c.text) LIKE ? GROUP BY c.space`,
+		account, "%@"+strings.ToLower(name)+"%")
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sp string
+		var n int
+		if rows.Scan(&sp, &n) == nil {
+			out[sp] = n
+		}
+	}
+	return out
+}
+
+// SetPinned keeps a chat on top of the list (on this machine).
+func (s *Store) SetPinned(account, space string, on bool) error {
+	_, err := s.db.Exec(`UPDATE spaces SET pinned=? WHERE account=? AND name=?`, on, account, space)
+	return err
+}
+
+// EditChatText changes a stored message's text (after an edit).
+func (s *Store) EditChatText(account, name, text string) error {
+	_, err := s.db.Exec(`UPDATE chat_messages SET text=?, edited=1 WHERE account=? AND name=?`, text, account, name)
+	return err
+}
+
+// DeleteChatMessage drops a deleted message from the local copy.
+func (s *Store) DeleteChatMessage(account, name string) error {
+	_, err := s.db.Exec(`DELETE FROM chat_messages WHERE account=? AND name=?`, account, name)
+	return err
+}
+
+// SetReactions stores a message's reaction summary.
+func (s *Store) SetReactions(account, name, reactions string) error {
+	_, err := s.db.Exec(`UPDATE chat_messages SET reactions=? WHERE account=? AND name=?`, reactions, account, name)
 	return err
 }
 
@@ -1011,10 +1078,10 @@ func (s *Store) PutChatMessages(msgs []ChatMessage) error {
 		if m.Files == nil {
 			files = []byte("[]")
 		}
-		if _, err := tx.Exec(`INSERT INTO chat_messages(account,name,space,thread,sender,sender_name,text,created,files,quoted) VALUES(?,?,?,?,?,?,?,?,?,?)
-		  ON CONFLICT(account,name) DO UPDATE SET text=excluded.text, files=excluded.files, quoted=excluded.quoted,
+		if _, err := tx.Exec(`INSERT INTO chat_messages(account,name,space,thread,sender,sender_name,text,created,files,quoted,reactions,edited) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+		  ON CONFLICT(account,name) DO UPDATE SET text=excluded.text, files=excluded.files, quoted=excluded.quoted, reactions=excluded.reactions, edited=excluded.edited,
 		    sender_name=CASE WHEN excluded.sender_name<>'' THEN excluded.sender_name ELSE sender_name END`,
-			m.Account, m.Name, m.Space, m.Thread, m.Sender, m.SenderName, m.Text, m.Created, string(files), m.Quoted); err != nil {
+			m.Account, m.Name, m.Space, m.Thread, m.Sender, m.SenderName, m.Text, m.Created, string(files), m.Quoted, m.Reactions, m.Edited); err != nil {
 			return err
 		}
 	}
@@ -1024,7 +1091,7 @@ func (s *Store) PutChatMessages(msgs []ChatMessage) error {
 // Spaces lists spaces, most recently active first, with unread counts
 // (messages from others after the space's read time).
 func (s *Store) Spaces(accounts []string, me map[string]string) ([]Space, error) {
-	q := `SELECT s.account,s.name,s.display_name,s.alias,s.threaded,s.type,s.last_active,s.last_read,s.synced_to,
+	q := `SELECT s.account,s.name,s.display_name,s.alias,s.threaded,s.pinned,s.type,s.last_active,s.last_read,s.synced_to,
 	  (SELECT COUNT(*) FROM chat_messages c JOIN accounts a ON a.name=c.account WHERE c.account=s.account AND c.space=s.name AND c.created>s.last_read AND c.sender<>a.chat_user),
 	  COALESCE((SELECT c.text FROM chat_messages c WHERE c.account=s.account AND c.space=s.name ORDER BY c.created DESC LIMIT 1),''),
 	  COALESCE((SELECT CASE WHEN c.sender<>'' AND c.sender=(SELECT chat_user FROM accounts WHERE name=s.account) THEN 'You' ELSE c.sender_name END
@@ -1046,7 +1113,7 @@ func (s *Store) Spaces(accounts []string, me map[string]string) ([]Space, error)
 	var out []Space
 	for rows.Next() {
 		var sp Space
-		if err := rows.Scan(&sp.Account, &sp.Name, &sp.DisplayName, &sp.Alias, &sp.Threaded, &sp.Type, &sp.LastActive, &sp.LastRead, &sp.SyncedTo, &sp.Unread, &sp.LastText, &sp.LastSender); err != nil {
+		if err := rows.Scan(&sp.Account, &sp.Name, &sp.DisplayName, &sp.Alias, &sp.Threaded, &sp.Pinned, &sp.Type, &sp.LastActive, &sp.LastRead, &sp.SyncedTo, &sp.Unread, &sp.LastText, &sp.LastSender); err != nil {
 			return nil, err
 		}
 		out = append(out, sp)
@@ -1071,7 +1138,7 @@ func (s *Store) ChatMessages(account, space string, limit int) ([]ChatMessage, e
 	if limit <= 0 {
 		limit = 200
 	}
-	rows, err := s.db.Query(`SELECT c.account,c.name,c.space,c.thread,c.sender,c.sender_name,c.text,c.created, c.sender=a.chat_user, c.files, c.quoted
+	rows, err := s.db.Query(`SELECT c.account,c.name,c.space,c.thread,c.sender,c.sender_name,c.text,c.created, c.sender=a.chat_user, c.files, c.quoted, c.reactions, c.edited
 	  FROM chat_messages c JOIN accounts a ON a.name=c.account WHERE c.account=? AND c.space=? ORDER BY c.created DESC LIMIT ?`, account, space, limit)
 	if err != nil {
 		return nil, err
@@ -1081,7 +1148,7 @@ func (s *Store) ChatMessages(account, space string, limit int) ([]ChatMessage, e
 	for rows.Next() {
 		var m ChatMessage
 		var files string
-		if err := rows.Scan(&m.Account, &m.Name, &m.Space, &m.Thread, &m.Sender, &m.SenderName, &m.Text, &m.Created, &m.Mine, &files, &m.Quoted); err != nil {
+		if err := rows.Scan(&m.Account, &m.Name, &m.Space, &m.Thread, &m.Sender, &m.SenderName, &m.Text, &m.Created, &m.Mine, &files, &m.Quoted, &m.Reactions, &m.Edited); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(files), &m.Files)

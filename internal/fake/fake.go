@@ -44,6 +44,8 @@ type ChatMessage struct {
 	Files                             []File
 	Created                           time.Time
 	Quoted                            string // a reply's quoted message
+	Reactions                         map[string]int
+	Edited                            bool
 }
 
 type Space struct {
@@ -443,6 +445,35 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			sp.LastRead, _ = time.Parse(time.RFC3339Nano, fmt.Sprint(body["lastReadTime"]))
 		}
 		write(w, map[string]string{"lastReadTime": sp.LastRead.UTC().Format(time.RFC3339Nano)})
+	case strings.HasPrefix(p, "/chat/v1/spaces/") && strings.HasSuffix(p, "/reactions") && r.Method == "POST":
+		name := strings.TrimSuffix(strings.TrimPrefix(p, "/chat/v1/"), "/reactions")
+		e, _ := body["emoji"].(map[string]any)
+		for _, m := range s.Chat {
+			if m.Name == name {
+				if m.Reactions == nil {
+					m.Reactions = map[string]int{}
+				}
+				m.Reactions[fmt.Sprint(e["unicode"])]++
+				write(w, map[string]any{"name": name + "/reactions/" + s.id()})
+				return
+			}
+		}
+		fail(w, 404, "no such message")
+	case strings.HasPrefix(p, "/chat/v1/spaces/") && strings.Contains(p, "/messages/") && (r.Method == "PATCH" || r.Method == "DELETE"):
+		name := strings.TrimPrefix(p, "/chat/v1/")
+		for i, m := range s.Chat {
+			if m.Name == name {
+				if r.Method == "DELETE" {
+					s.Chat = append(s.Chat[:i], s.Chat[i+1:]...)
+					write(w, map[string]any{})
+					return
+				}
+				m.Text, m.Edited = fmt.Sprint(body["text"]), true
+				write(w, s.chatJSON(m, nil))
+				return
+			}
+		}
+		fail(w, 404, "no such message")
 	case strings.HasPrefix(p, "/chat/v1/spaces/") && strings.Contains(p, "/messages/") && r.Method == "GET":
 		name := strings.TrimPrefix(p, "/chat/v1/")
 		for _, m := range s.Chat {
@@ -540,15 +571,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			write(w, map[string]string{"name": m.Name})
 			return
 		}
-		var after time.Time
+		var after, before time.Time
 		if f := q.Get("filter"); f != "" {
 			if i := strings.Index(f, `"`); i >= 0 {
-				after, _ = time.Parse(time.RFC3339Nano, strings.Trim(f[i:], `"`))
+				t, _ := time.Parse(time.RFC3339Nano, strings.Trim(f[i:], `"`))
+				if strings.Contains(f, "<") {
+					before = t
+				} else {
+					after = t
+				}
 			}
 		}
 		var msgs []*ChatMessage
 		for _, m := range s.Chat {
-			if m.Space == name && m.Created.After(after) {
+			if m.Space == name && m.Created.After(after) && (before.IsZero() || m.Created.Before(before)) {
 				msgs = append(msgs, m)
 			}
 		}
@@ -605,6 +641,17 @@ func (s *Server) chatJSON(m *ChatMessage, atts []any) map[string]any {
 		"sender": map[string]string{"name": m.Sender, "type": "HUMAN"}, "thread": map[string]string{"name": m.Thread}, "attachment": atts}
 	if m.Quoted != "" {
 		j["quotedMessageMetadata"] = map[string]string{"name": m.Quoted, "lastUpdateTime": m.Created.UTC().Format(time.RFC3339Nano)}
+	}
+	var rs []any
+	for e, n := range m.Reactions {
+		rs = append(rs, map[string]any{"emoji": map[string]string{"unicode": e}, "reactionCount": n})
+	}
+	if len(rs) > 0 {
+		j["emojiReactionSummaries"] = rs
+	}
+	j["lastUpdateTime"] = j["createTime"]
+	if m.Edited {
+		j["lastUpdateTime"] = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	return j
 }
@@ -712,5 +759,5 @@ func (s *Server) Seed() {
 	s.AddChat(ChatMessage{Space: "spaces/portal-dev", Sender: "users/3", Text: "@You can you look at #412 before lunch?", Created: today(9, 30)})
 	s.AddChat(ChatMessage{Name: "spaces/dm-priya/messages/m-notes", Space: "spaces/dm-priya", Sender: "users/1", Text: "sent you the 3.8 notes", Created: today(9, 40)})
 	s.AddChat(ChatMessage{Space: "spaces/dm-priya", Sender: "users/2", Text: "can you check my mail? need the release answer today", Created: today(9, 44),
-		Quoted: "spaces/dm-priya/messages/m-notes"})
+		Quoted: "spaces/dm-priya/messages/m-notes", Reactions: map[string]int{"👍": 1}})
 }

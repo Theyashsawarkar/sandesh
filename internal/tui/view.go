@@ -136,6 +136,9 @@ func (m Model) View() string {
 	case m.mode == modeHelp:
 		box := m.helpPopup()
 		rows[len(rows)-1] = overlayAt(rows[len(rows)-1], box, m.w, max(0, (bh-len(box))/2))
+	case m.mode == modeReact:
+		box := m.reactPopup()
+		rows[len(rows)-1] = overlayAt(rows[len(rows)-1], box, m.w, max(0, bh/2-2))
 	case m.mode == modeConvo && m.convo != nil:
 		box := m.convoPopup()
 		rows[len(rows)-1] = overlayAt(rows[len(rows)-1], box, m.w, max(0, (bh-len(box))/3))
@@ -401,7 +404,7 @@ func (m Model) inputView() string {
 func (m Model) footerView() string {
 	s := m.styles
 	modeName := map[mode]string{modeNormal: "normal", modeFilter: "filter", modeAsk: "ask", modeSearch: "search", modeSaveName: "save",
-		modeDraftHint: "draft", modeReview: "review", modeApprove: "approve", modeHelp: "keys", modeChatMsg: "message", modeLink: "link", modeCompose: "compose", modeFind: "search", modeRename: "rename", modePick: "files", modeWhen: "later", modeConvo: "new chat"}[m.mode]
+		modeDraftHint: "draft", modeReview: "review", modeApprove: "approve", modeHelp: "keys", modeChatMsg: "message", modeLink: "link", modeCompose: "compose", modeFind: "search", modeRename: "rename", modePick: "files", modeWhen: "later", modeConvo: "new chat", modeReact: "react"}[m.mode]
 	var keys [][2]string
 	switch m.mode {
 	case modeReview:
@@ -430,7 +433,10 @@ func (m Model) footerView() string {
 	case modeFilter, modeAsk, modeSearch, modeSaveName, modeDraftHint, modeLink, modeRename:
 		keys = [][2]string{{"enter", "done"}, {"esc", "cancel"}, {"ctrl+u", "clear"}}
 	case modeChatMsg:
-		keys = [][2]string{{"enter", "send"}, {"ctrl+t", "send later"}, {"esc", "cancel"}, {"ctrl+u", "clear"}}
+		keys = [][2]string{{"enter", "send"}, {"ctrl+o", "file"}, {"ctrl+t", "send later"}, {"esc", "cancel"}, {"ctrl+u", "clear"}}
+		if m.editingMsg != "" {
+			keys = [][2]string{{"enter", "save the edit"}, {"esc", "cancel"}}
+		}
 	case modeHelp:
 		keys = [][2]string{{"?", "close"}}
 	default:
@@ -438,7 +444,7 @@ func (m Model) footerView() string {
 			keys = [][2]string{{"j/k", "move"}, {"h/l", "section"}, {"tab", "chat"}, {"⏎", "open"}, {"m/M", "read/unread"}, {"c", "compose"}, {"r", "reply"},
 				{"e", "archive"}, {"Q", "quoted"}, {"o", "link"}, {"@", "ask"}, {"?", "keys"}}
 		} else if m.pickingMsg() {
-			keys = [][2]string{{"j/k", "pick a message"}, {"r", "reply to it"}, {"i", "new message"}, {"y", "copy it"}, {"v", "save its files"}, {"1", "back to the list"}}
+			keys = [][2]string{{"j/k", "pick"}, {"r", "reply"}, {"e", "react"}, {"E", "edit"}, {"d", "delete"}, {"y", "copy"}, {"v", "files"}, {"[ ]", "chats"}, {"1", "list"}}
 		} else {
 			keys = [][2]string{{"j/k", "move"}, {"h/l", "section"}, {"tab", "mail"}, {"⏎", "open"}, {"i", "type"}, {"r", "reply"}, {"N", "new chat"},
 				{"m/M", "read/unread"}, {"@", "ask"}, {"?", "keys"}}
