@@ -132,7 +132,7 @@ type Model struct {
 	armDelete     string           // d pressed once on this message
 	reactSel      int              // the emoji picked in the reaction window
 	chatLimit     int              // how many messages of this chat to show (grows as older ones load)
-	jumpBack []string // replies you jumped from to their originals (Backspace goes back)
+	jumpBack      []string         // replies you jumped from to their originals (Backspace goes back)
 	newLine       int              // where the "new" line is in the preview (0: none)
 	scrollToNew   bool
 	replyTo       *store.ChatMessage // the message the one being typed replies to

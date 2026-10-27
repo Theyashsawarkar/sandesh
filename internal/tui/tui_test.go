@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"fmt"
 	"context"
 	"flag"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"strings"
