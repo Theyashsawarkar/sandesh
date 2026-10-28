@@ -2,6 +2,15 @@
 
 Newest first.
 
+## Unreleased
+
+- **HTML mail, for tables and the like**: `mail_send` and `mail_draft` take
+  an optional `html` (and `sandesh mail send` an `--html FILE`). It goes
+  out beside the plain text as `multipart/alternative`, so mail apps show
+  the HTML and the plain text is still there for those that don't; a reply
+  quotes the thread in the HTML too. Plain text alone can't make a table
+  Gmail shows as one.
+
 ## v0.2.0 -- 2026-10-28
 
 - **`--tab chat`**: `sandesh --tab chat` (and `sandesh --popup --tab chat`)

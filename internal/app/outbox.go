@@ -312,7 +312,7 @@ func (a *App) deliver(ctx context.Context, it store.OutboxItem) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	raw, err := mime.Build(mime.Draft{From: acc.Email, To: out.To, Cc: out.Cc, Bcc: out.Bcc, Subject: out.Subject, Body: out.Body,
+	raw, err := mime.Build(mime.Draft{From: acc.Email, To: out.To, Cc: out.Cc, Bcc: out.Bcc, Subject: out.Subject, Body: out.Body, HTML: out.HTML,
 		InReplyTo: out.InReplyTo, References: out.References, Files: files})
 	if err != nil {
 		return "", err
@@ -354,7 +354,7 @@ func (a *App) SaveDraft(ctx context.Context, account string, out store.Outgoing)
 	if err != nil {
 		return "", err
 	}
-	raw, err := mime.Build(mime.Draft{From: acc.Email, To: out.To, Cc: out.Cc, Bcc: out.Bcc, Subject: out.Subject, Body: out.Body,
+	raw, err := mime.Build(mime.Draft{From: acc.Email, To: out.To, Cc: out.Cc, Bcc: out.Bcc, Subject: out.Subject, Body: out.Body, HTML: out.HTML,
 		InReplyTo: out.InReplyTo, References: out.References, Files: files})
 	if err != nil {
 		return "", err

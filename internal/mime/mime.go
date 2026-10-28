@@ -235,11 +235,14 @@ func ParseList(s string) []string {
 
 // Outgoing message fields.
 type Draft struct {
-	From       string
-	To, Cc     []string
-	Bcc        []string
-	Subject    string
-	Body       string
+	From    string
+	To, Cc  []string
+	Bcc     []string
+	Subject string
+	Body    string
+	// HTML, when set, goes out beside Body (multipart/alternative): mail
+	// apps show it, and the plain text is there for those that don't.
+	HTML       string
 	InReplyTo  string
 	References string
 	Files      []File
@@ -280,9 +283,21 @@ func Build(d Draft) (string, error) {
 	h("In-Reply-To", d.InReplyTo)
 	h("References", d.References)
 	h("MIME-Version", "1.0")
-	text := func() {
+	plain := func() {
 		b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: base64\r\n\r\n")
 		writeB64(&b, []byte(strings.ReplaceAll(d.Body, "\n", "\r\n")))
+	}
+	// The body: plain text alone, or plain and HTML as alternatives.
+	text := plain
+	if d.HTML != "" {
+		text = func() {
+			alt := fmt.Sprintf("sandesh-alt-%d", time.Now().UnixNano())
+			b.WriteString(`Content-Type: multipart/alternative; boundary="` + alt + "\"\r\n\r\n--" + alt + "\r\n")
+			plain()
+			b.WriteString("--" + alt + "\r\nContent-Type: text/html; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: base64\r\n\r\n")
+			writeB64(&b, []byte(d.HTML))
+			b.WriteString("--" + alt + "--\r\n")
+		}
 	}
 	if len(d.Files) == 0 {
 		text()
@@ -389,4 +404,15 @@ func Quote(body string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// QuoteHTML adds a quoted earlier message (plain text, as a reply quotes
+// it) under an HTML body, the way Gmail shows a quote.
+func QuoteHTML(body, quoted string) string {
+	if quoted == "" {
+		return body
+	}
+	q := strings.ReplaceAll(html.EscapeString(strings.TrimRight(quoted, "\n")), "\n", "<br>\n")
+	return body + `<br><br><div class="gmail_quote"><blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">` +
+		q + "</blockquote></div>"
 }

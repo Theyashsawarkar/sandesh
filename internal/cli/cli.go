@@ -517,9 +517,10 @@ func splitAddrs(s string) []string {
 }
 
 func mailSend(a *app.App, args []string) error {
-	fs := flags("sandesh mail send", `sandesh mail send --to A[,B] [--cc C] [--subject S] [--attach FILE]... [--at WHEN] [--reply THREAD] [--all] [--account A] [--now]
+	fs := flags("sandesh mail send", `sandesh mail send --to A[,B] [--cc C] [--subject S] [--attach FILE]... [--html FILE] [--at WHEN] [--reply THREAD] [--all] [--account A] [--now]
 
-The body comes from stdin, or $EDITOR when stdin is a terminal. --reply
+The body comes from stdin, or $EDITOR when stdin is a terminal. --html adds
+an HTML version from FILE (a table, say), sent beside the plain text. --reply
 answers a thread (subject, recipients and quoting filled in; --all is reply
 all). The send waits undo_seconds (default 10) first: Ctrl+c cancels.`)
 	to := fs.String("to", "", "recipients, comma separated")
@@ -532,6 +533,7 @@ all). The send waits undo_seconds (default 10) first: Ctrl+c cancels.`)
 	nowFlag := fs.Bool("now", false, "skip the undo window")
 	var attach listFlag
 	fs.Var(&attach, "attach", "a file to attach (repeat for more)")
+	htmlFile := fs.String("html", "", "an HTML version of the message, from this file")
 	at := fs.String("at", "", "send later: \"tomorrow 9am\", \"fri 6pm\", \"in 2h\", \"3 nov 10:30\"")
 	if _, err := parse(fs, args); err != nil {
 		return err
@@ -586,6 +588,13 @@ all). The send waits undo_seconds (default 10) first: Ctrl+c cancels.`)
 		if quoted != "" {
 			out.Body = strings.TrimRight(body, "\n") + "\n\n" + quoted
 		}
+	}
+	if *htmlFile != "" {
+		h, err := os.ReadFile(*htmlFile)
+		if err != nil {
+			return err
+		}
+		out.HTML = mime.QuoteHTML(string(h), quoted)
 	}
 	if *nowFlag {
 		a.Config.UndoSeconds = 0

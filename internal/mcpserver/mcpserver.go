@@ -262,6 +262,7 @@ type composeIn struct {
 	Bcc           []string `json:"bcc,omitempty" jsonschema:"bcc addresses"`
 	Subject       string   `json:"subject,omitempty" jsonschema:"subject (filled in for replies)"`
 	Body          string   `json:"body" jsonschema:"the message text (plain text)"`
+	HTML          string   `json:"html,omitempty" jsonschema:"optional HTML version of the same message, for what plain text can't show (a table); sent beside body, which mail apps without HTML show"`
 	ReplyToThread string   `json:"reply_to_thread,omitempty" jsonschema:"thread id to reply in"`
 	ReplyAll      bool     `json:"reply_all,omitempty" jsonschema:"with reply_to_thread: cc everyone on the thread"`
 	Attachments   []string `json:"attachments,omitempty" jsonschema:"paths of local files to attach (the user always approves sends with files)"`
@@ -274,7 +275,7 @@ func (s *server) compose(in composeIn) (string, store.Outgoing, error) {
 	if err != nil {
 		return "", store.Outgoing{}, err
 	}
-	out := store.Outgoing{To: in.To, Cc: in.Cc, Bcc: in.Bcc, Subject: in.Subject, Body: in.Body}
+	out := store.Outgoing{To: in.To, Cc: in.Cc, Bcc: in.Bcc, Subject: in.Subject, Body: in.Body, HTML: in.HTML}
 	for _, p := range in.Attachments {
 		out.Files = append(out.Files, store.File{Source: p})
 	}
@@ -303,6 +304,9 @@ func (s *server) compose(in composeIn) (string, store.Outgoing, error) {
 		}
 		out.ThreadID, out.InReplyTo, out.References = r.ThreadID, r.InReplyTo, r.References
 		out.Body = strings.TrimRight(in.Body, "\n") + "\n\n" + r.Body
+		if out.HTML != "" {
+			out.HTML = mime.QuoteHTML(out.HTML, r.Body)
+		}
 	}
 	return acc.Name, out, nil
 }

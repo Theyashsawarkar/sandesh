@@ -473,8 +473,8 @@ claude  → contacts_find → mail_send
 | `mail_search` | Gmail search syntax, or the local copy offline | reads |
 | `mail_read` | A whole thread as text; attachments listed, not opened | reads |
 | `mail_modify` | Archive, unarchive, trash, untrash, mark read/unread, star | changes, undoable |
-| `mail_draft` | Save a Gmail draft (replies fill in recipients and quoting) | changes |
-| `mail_send` | Send a mail or a reply | **asks you** |
+| `mail_draft` | Save a Gmail draft (replies fill in recipients and quoting; optional `html` beside the text) | changes |
+| `mail_send` | Send a mail or a reply (optional `html` beside the text, for a table) | **asks you** |
 | `chat_spaces` | Spaces and DMs with unread counts | reads |
 | `chat_read` | A space's recent messages | reads |
 | `chat_send` | Post in a space, DM or thread | **asks you** |

@@ -37,6 +37,7 @@ type Outgoing struct {
 	Quote     string `json:"quote,omitempty"` // the message this one replies to (quoting it)
 	// both
 	Body  string `json:"body"`
+	HTML  string `json:"html,omitempty"` // mail: sent beside Body when set
 	Files []File `json:"files,omitempty"`
 	// ScheduledFor (ms) holds it until then instead of the undo window
 	ScheduledFor int64 `json:"scheduled_for,omitempty"`
