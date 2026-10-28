@@ -2,7 +2,7 @@
 
 Newest first.
 
-## Unreleased
+## v0.2.0 -- 2026-10-28
 
 - **`--tab chat`**: `sandesh --tab chat` (and `sandesh --popup --tab chat`)
   opens the screen on the chat tab, so a status bar's chat count can open
